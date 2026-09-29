@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Julia</title></head>
+<body style="margin:0;background:#05050f;color:#dfe8ff;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh">
+<h1 style="font-weight:500">Julia</h1>
+<p id="s">Connexion au serveur...</p>
+<script>
+fetch('/api/ping').then(r=>r.json()).then(d=>{document.getElementById('s').textContent='Julia est en ligne'}).catch(()=>{document.getElementById('s').textContent='Serveur injoignable'})
+</script></body></html>
