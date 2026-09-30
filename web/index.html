@@ -28,7 +28,7 @@ canvas#c{position:absolute;inset:0;width:100%;height:100%}
 <div class="br" style="left:10px;bottom:10px;border-width:0 0 1px 1px"></div><div class="br" style="right:10px;bottom:10px;border-width:0 1px 1px 0"></div>
 <div id="top"><div><div id="ttl" style="font-size:24px;font-weight:700;letter-spacing:.05em;color:#f5b21f">J.U.L.I.A</div><span id="chip" style="display:inline-block;margin-top:6px;font-size:12px;padding:3px 10px;border-radius:10px;border:0.5px solid #f0a830;color:#f0a830">En veille</span></div>
 <button id="gear" class="b" aria-label="Paramètres" style="position:absolute;right:20px;top:calc(env(safe-area-inset-top,0px) + 14px);padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
-<div class="side" style="left:20px">Modèle<br><span id="mdl">Qwen 1,5B</span><br>Mémoire<br><span>0 souvenir</span></div>
+<div class="side" style="left:20px">Modèle<br><span id="mdl">Qwen 1,5B</span><br>Mémoire<br><span id="cnt">0 souvenir</span></div>
 <div class="side" style="right:20px;text-align:right">Langue<br><span id="lg">Français</span></div>
 <div id="bot">
 <div style="text-align:center;min-height:78px;margin-bottom:6px">
@@ -36,9 +36,10 @@ canvas#c{position:absolute;inset:0;width:100%;height:100%}
 <p id="j" style="margin:0;font-size:16px;line-height:1.5"></p></div>
 <canvas id="wv" style="width:100%;height:36px;display:block;margin-bottom:14px"></canvas>
 <div style="display:flex;justify-content:center;align-items:center;gap:30px">
-<button class="b" aria-label="Mémoire" style="border-radius:50%;width:46px;height:46px;padding:0"><svg class="ic" viewBox="0 0 24 24"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V5a2 2 0 0 0-3-1zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1"/></svg></button>
+<button id="brain" class="b" aria-label="Mémoire" style="border-radius:50%;width:46px;height:46px;padding:0"><svg class="ic" viewBox="0 0 24 24"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V5a2 2 0 0 0-3-1zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1"/></svg></button>
 <button id="mic" class="b" aria-label="Parler" style="border-radius:50%;width:66px;height:66px;padding:0;border-width:2px;border-color:#f0a830"><svg class="ic" viewBox="0 0 24 24" style="width:28px;height:28px"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
 <button class="b" aria-label="Clavier" style="border-radius:50%;width:46px;height:46px;padding:0"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></button></div></div>
+<div id="mp" style="position:absolute;inset:0;z-index:2;background:rgba(7,4,3,.97);padding:calc(env(safe-area-inset-top,0px) + 16px) 20px 20px;overflow:auto;transform:translateX(-100%);transition:transform .25s"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:20px;font-weight:500">Mémoire</span><button id="mcl" class="b" aria-label="Fermer" style="padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div><div id="mlist"></div></div>
 <div id="pn">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:20px;font-weight:500">Paramètres</span><button id="cl" class="b" aria-label="Fermer" style="padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
 <div class="rw"><span>Voix de Julia</span><div class="tg" data-k="voice"><i></i></div></div>
@@ -68,7 +69,7 @@ document.querySelectorAll('#sw b').forEach(function(s){s.style.borderColor=+s.da
 document.querySelectorAll('.tg').forEach(function(e){e.onclick=function(){cfg[e.dataset.k]=cfg[e.dataset.k]?0:1;save();paint()}});
 document.querySelectorAll('[data-seg]').forEach(function(g){g.querySelectorAll('button').forEach(function(b){b.onclick=function(){cfg[g.dataset.seg]=b.dataset.v;save();paint()}})});
 var wipe=document.getElementById('wipe'),wt;
-wipe.onclick=function(){if(wipe.textContent==='Effacer'){wipe.textContent='Confirmer';wt=setTimeout(function(){wipe.textContent='Effacer'},3000)}else{clearTimeout(wt);wipe.textContent='Effacé';fetch('/api/memory/clear',{method:'POST'}).catch(function(){});setTimeout(function(){wipe.textContent='Effacer'},1500)}};
+wipe.onclick=function(){if(wipe.textContent==='Effacer'){wipe.textContent='Confirmer';wt=setTimeout(function(){wipe.textContent='Effacer'},3000)}else{clearTimeout(wt);wipe.textContent='Effacé';fetch('/api/memory/clear',{method:'POST'}).then(function(){memLoad()}).catch(function(){});setTimeout(function(){wipe.textContent='Effacer'},1500)}};
 document.getElementById('gear').onclick=function(){document.getElementById('pn').style.transform='translateX(0)'};
 document.getElementById('cl').onclick=function(){document.getElementById('pn').style.transform='translateX(100%)'};
 paint();
@@ -107,12 +108,27 @@ if(d.listening&&n<60){tmr.push(setTimeout(function(){poll(n+1)},250));return}
 if(d.error&&!d.text){fail(d.error);return}
 if(!d.text){fail('rien entendu');return}
 uu.textContent=d.text;setState('think');jj.textContent='Julia réfléchit…';
-fetch('/api/reply',{method:'POST',body:JSON.stringify({text:d.text,lang:cfg.lang,voice:cfg.voice})}).then(function(r){return r.json()}).then(function(a){
-setState('speak');jj.textContent='';typeInto(jj,a.reply);
+fetch('/api/reply',{method:'POST',body:JSON.stringify({text:d.text,lang:cfg.lang,voice:cfg.voice,mem:cfg.mem})}).then(function(r){return r.json()}).then(function(a){
+setState('speak');jj.textContent='';typeInto(jj,a.reply);memLoad();
 tmr.push(setTimeout(function(){setState('rest')},Math.max(2500,a.reply.length*70)))
 }).catch(function(){fail('réponse indisponible')})
 }).catch(function(){fail('serveur injoignable')})}
 mic.onclick=startListen;jj.textContent='Touche la sphère ou le micro pour parler';jj.style.color='#b39a70';
+var mp=document.getElementById("mp"),ml=document.getElementById("mlist");
+function esc(s){return String(s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]})}
+function memLoad(cb){fetch("/api/memory").then(function(r){return r.json()}).then(function(d){var n=d.count;document.getElementById("cnt").textContent=n+" souvenir"+(n>1?"s":"");if(cb)cb(d)}).catch(function(){})}
+function memRender(d){
+var h="<p style='color:#b39a70;font-size:13px'>Ce que Julia a retenu de toi</p>";
+if(!d.facts.length)h+="<p style='font-size:14px'>Rien pour l'instant.</p>";
+d.facts.forEach(function(f){h+="<div class='rw'><span>"+esc(f.text)+"</span><button class='b' data-id='"+f.id+"' style='padding:4px 9px'>Suppr.</button></div>"});
+h+="<p style='color:#b39a70;font-size:13px;margin-top:18px'>Derniers échanges</p>";
+if(!d.recent.length)h+="<p style='font-size:14px'>Aucun échange enregistré.</p>";
+d.recent.forEach(function(r){h+="<p style='font-size:13px;line-height:1.5;margin:8px 0'><span style='color:#b39a70'>"+(r.role==="user"?"Toi":"Julia")+" :</span> "+esc(r.text)+"</p>"});
+ml.innerHTML=h;
+ml.querySelectorAll("button[data-id]").forEach(function(b){b.onclick=function(){fetch("/api/memory/delete",{method:"POST",body:JSON.stringify({id:+b.dataset.id})}).then(function(){memLoad(memRender)})}})}
+document.getElementById("brain").onclick=function(){mp.style.transform="translateX(0)";memLoad(memRender)};
+document.getElementById("mcl").onclick=function(){mp.style.transform="translateX(-100%)"};
+memLoad();
 var cx=Math.cos(0.3),sx=Math.sin(0.3),CX=0,CY=0,unit=1;
 cv.addEventListener('pointerdown',function(e){px=e.clientX;py=e.clientY;sx0=px;sy0=py});
 cv.addEventListener('pointermove',function(e){if(e.pressure>0){px=e.clientX;py=e.clientY}});
