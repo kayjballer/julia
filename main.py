@@ -9,6 +9,8 @@ DB = os.path.join(DATA, 'julia.db')
 BRAIN = 'http://127.0.0.1:8080/v1/chat/completions'
 NOBRAIN = "Mon cerveau n'est pas lancé. Ouvre Termux et démarre llama-server."
 ST = {'active': False, 't0': 0.0, 'err': None}
+GEN = {'id': 0, 'text': '', 'done': True, 'brain': True}
+VOUS = re.compile(r"\b(vous|votre|vos)\b", re.I)
 
 try:
     from plyer import stt, tts
@@ -73,29 +75,63 @@ def system_prompt(lang, facts):
         return s
     s = ("Tu es Julia, une assistante vocale locale, chaleureuse et directe. "
          "Tu réponds toujours en français, en une ou deux phrases courtes, sans listes, "
-         "sans emojis, comme à l'oral. Tu tutoies toujours l'utilisateur. "
+         "sans emojis, comme à l'oral. Tu tutoies toujours l'utilisateur, même s'il te vouvoie. "
          "Si tu ne sais pas, dis-le simplement.")
     if facts:
         s += "\nCe que tu sais de l'utilisateur : " + " ; ".join(facts) + "."
     return s
 
 
-def ask_brain(messages):
-    body = json.dumps({'messages': messages, 'max_tokens': 90,
-                       'temperature': 0.6, 'stream': False}).encode()
+SHOT_FR = [{'role': 'user', 'content': 'Salut, tu peux te présenter ?'},
+           {'role': 'assistant', 'content': "Salut ! Moi c'est Julia, ton assistante vocale. Dis-moi ce dont tu as besoin."}]
+SHOT_EN = [{'role': 'user', 'content': 'Hi, can you introduce yourself?'},
+           {'role': 'assistant', 'content': "Hi! I'm Julia, your voice assistant. Tell me what you need."}]
+
+
+def build_messages(text, lang, mem):
+    facts, hist = [], []
+    if mem:
+        for f in extract_facts(text):
+            sql('INSERT OR IGNORE INTO facts(ts,text) VALUES(?,?)', (time.time(), f))
+        facts = [r['text'] for r in sql('SELECT text FROM facts ORDER BY id DESC LIMIT 12', fetch=True)]
+        rows = sql('SELECT role,text FROM conv ORDER BY id DESC LIMIT 12', fetch=True)[::-1]
+        pairs, i = [], 0
+        while i + 1 < len(rows):
+            if rows[i]['role'] == 'user' and rows[i + 1]['role'] == 'assistant':
+                pairs.append((rows[i]['text'], rows[i + 1]['text']))
+                i += 2
+            else:
+                i += 1
+        for u, a in pairs[-3:]:
+            if lang == 'EN' or not VOUS.search(a):
+                hist += [{'role': 'user', 'content': u}, {'role': 'assistant', 'content': a}]
+    shot = SHOT_EN if lang == 'EN' else SHOT_FR
+    return [{'role': 'system', 'content': system_prompt(lang, facts)}] + shot + hist + \
+           [{'role': 'user', 'content': text}]
+
+
+def clean_think(t):
+    return re.sub(r'<think>.*?(</think>|$)', '', t, flags=re.S).strip()
+
+
+def stream_brain(messages, on_text):
+    body = json.dumps({'messages': messages, 'max_tokens': 90, 'temperature': 0.6,
+                       'stream': True, 'cache_prompt': True}).encode()
     req = urllib.request.Request(BRAIN, data=body, headers={'Content-Type': 'application/json'})
     with urllib.request.urlopen(req, timeout=90) as r:
-        d = json.loads(r.read().decode())
-    out = d['choices'][0]['message']['content']
-    return re.sub(r'<think>.*?</think>', '', out, flags=re.S).strip()
-
-
-def brain_alive():
-    try:
-        urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=1.5).read()
-        return True
-    except Exception:
-        return False
+        for raw in r:
+            line = raw.decode('utf-8', 'ignore').strip()
+            if not line.startswith('data:'):
+                continue
+            payload = line[5:].strip()
+            if payload == '[DONE]':
+                break
+            try:
+                delta = json.loads(payload)['choices'][0]['delta'].get('content') or ''
+            except Exception:
+                continue
+            if delta:
+                on_text(delta)
 
 
 def _speak(text):
@@ -105,28 +141,55 @@ def _speak(text):
         pass
 
 
-def reply(text, lang, voice, mem):
-    facts, hist = [], []
-    if mem:
-        for f in extract_facts(text):
-            sql('INSERT OR IGNORE INTO facts(ts,text) VALUES(?,?)', (time.time(), f))
-        facts = [r['text'] for r in sql('SELECT text FROM facts ORDER BY id DESC LIMIT 12', fetch=True)]
-        rows = sql('SELECT role,text FROM conv ORDER BY id DESC LIMIT 6', fetch=True)
-        hist = [{'role': r['role'], 'content': r['text']} for r in reversed(rows)]
-    msgs = [{'role': 'system', 'content': system_prompt(lang, facts)}] + hist + \
-           [{'role': 'user', 'content': text}]
+def generate(gid, text, lang, voice, mem):
+    msgs = build_messages(text, lang, mem)
     ok = True
+
+    def on_text(d):
+        if GEN['id'] == gid:
+            GEN['text'] += d
+
     try:
-        out = ask_brain(msgs) or "Je n'ai pas de réponse pour l'instant."
+        stream_brain(msgs, on_text)
     except Exception:
-        out, ok = NOBRAIN, False
+        ok = False
+    if GEN['id'] != gid:
+        return
+    out = clean_think(GEN['text'])
+    if not out:
+        out = "Je n'ai pas de réponse pour l'instant." if ok else NOBRAIN
+    GEN['text'] = out
+    GEN['brain'] = ok
     if mem and ok:
         now = time.time()
         sql('INSERT INTO conv(ts,role,text) VALUES(?,?,?)', (now, 'user', text))
         sql('INSERT INTO conv(ts,role,text) VALUES(?,?,?)', (now, 'assistant', out))
     if voice and tts is not None:
         threading.Thread(target=_speak, args=(out,), daemon=True).start()
-    return {'reply': out, 'brain': ok}
+    GEN['done'] = True
+
+
+def start_ask(data):
+    GEN['id'] += 1
+    gid = GEN['id']
+    GEN.update(text='', done=False, brain=True)
+    threading.Thread(target=generate, daemon=True,
+                     args=(gid, str(data.get('text', '')), data.get('lang', 'FR'),
+                           data.get('voice', 1), data.get('mem', 1))).start()
+    return {'ok': True, 'id': gid}
+
+
+def gen_state():
+    t = GEN['text'] if GEN['done'] else clean_think(GEN['text'])
+    return {'text': t, 'done': GEN['done'], 'brain': GEN['brain'], 'id': GEN['id']}
+
+
+def brain_alive():
+    try:
+        urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=1.5).read()
+        return True
+    except Exception:
+        return False
 
 
 def memory_info():
@@ -216,6 +279,8 @@ class H(SimpleHTTPRequestHandler):
             return self._json(listen(lang))
         if u.path == '/api/stt':
             return self._json(stt_state())
+        if u.path == '/api/gen':
+            return self._json(gen_state())
         if u.path == '/api/memory':
             return self._json(memory_info())
         super().do_GET()
@@ -226,9 +291,8 @@ class H(SimpleHTTPRequestHandler):
             data = json.loads(self.rfile.read(n) or b'{}')
         except Exception:
             data = {}
-        if self.path == '/api/reply':
-            return self._json(reply(str(data.get('text', '')), data.get('lang', 'FR'),
-                                    data.get('voice', 1), data.get('mem', 1)))
+        if self.path == '/api/ask':
+            return self._json(start_ask(data))
         if self.path == '/api/memory/clear':
             sql('DELETE FROM conv')
             sql('DELETE FROM facts')
