@@ -28,10 +28,10 @@ canvas#c{position:absolute;inset:0;width:100%;height:100%}
 <div class="br" style="left:10px;bottom:10px;border-width:0 0 1px 1px"></div><div class="br" style="right:10px;bottom:10px;border-width:0 1px 1px 0"></div>
 <div id="top"><div><div id="ttl" style="font-size:24px;font-weight:700;letter-spacing:.05em;color:#f5b21f">J.U.L.I.A</div><span id="chip" style="display:inline-block;margin-top:6px;font-size:12px;padding:3px 10px;border-radius:10px;border:0.5px solid #f0a830;color:#f0a830">En veille</span></div>
 <button id="gear" class="b" aria-label="Paramètres" style="position:absolute;right:20px;top:calc(env(safe-area-inset-top,0px) + 14px);padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
-<div class="side" style="left:20px">Modèle<br><span id="mdl">Qwen 1,5B</span><br>Mémoire<br><span id="cnt">0 souvenir</span></div>
+<div class="side" style="left:20px">Modèle<br><span id="mdl">Auto</span><br>Mémoire<br><span id="cnt">0 souvenir</span></div>
 <div class="side" style="right:20px;text-align:right">Langue<br><span id="lg">Français</span></div>
 <div id="bot">
-<div style="text-align:center;min-height:78px;margin-bottom:6px">
+<div style="text-align:center;min-height:78px;max-height:26vh;overflow-y:auto;margin-bottom:6px">
 <p id="u" style="margin:0 0 6px;font-size:13px;color:#b39a70;line-height:1.5"></p>
 <p id="j" style="margin:0;font-size:16px;line-height:1.5"></p></div>
 <div id="kb" style="display:none;gap:8px;margin-bottom:10px"><input id="kin" type="text" enterkeyhint="send" autocomplete="off" placeholder="Écris à Julia…" style="flex:1;min-width:0;background:rgba(255,255,255,.06);color:#f3e3c3;border:0.5px solid rgba(255,200,110,.32);border-radius:10px;padding:10px 12px;font-size:16px;font-family:inherit;-webkit-user-select:text;user-select:text"><button id="ksend" class="b" aria-label="Envoyer" style="padding:0 14px">Envoyer</button></div>
@@ -48,7 +48,8 @@ canvas#c{position:absolute;inset:0;width:100%;height:100%}
 <div class="rw"><span>Ton de la voix</span><span data-seg="pitch"><button class="b" data-v="grave">Grave</button> <button class="b" data-v="normal">Normal</button> <button class="b" data-v="aigu">Aigu</button></span></div>
 <div class="rw"><span>Voix</span><button id="vbtn" class="b">Système</button></div>
 <div class="rw"><span>Langue</span><span data-seg="lang"><button class="b" data-v="FR">FR</button> <button class="b" data-v="EN">EN</button> <button class="b" data-v="WO">WO</button></span></div>
-<div class="rw"><span>Modèle IA</span><span data-seg="model"><button class="b" data-v="rapide">Rapide</button> <button class="b" data-v="equilibre">Équilibré</button></span></div>
+<div class="rw"><span>Modèle IA</span><span data-seg="model"><button class="b" data-v="auto">Auto</button> <button class="b" data-v="general">Général</button> <button class="b" data-v="code">Code</button></span></div>
+<div class="rw"><span>Accès à Internet</span><div class="tg" data-k="web"><i></i></div></div>
 <div class="rw"><span>Sensibilité du micro</span><span data-seg="mic"><button class="b" data-v="bas">Bas</button> <button class="b" data-v="moyen">Moyen</button> <button class="b" data-v="haut">Haut</button></span></div>
 <div class="rw"><span>Mémoire automatique</span><div class="tg" data-k="mem"><i></i></div></div>
 <div class="rw"><span>Effacer la mémoire</span><button id="wipe" class="b" style="border-color:#e26a6a;color:#f0a0a0">Effacer</button></div>
@@ -59,39 +60,30 @@ var cv=document.getElementById('c'),ctx=cv.getContext('2d'),wv=document.getEleme
 var W,H,dpr=window.devicePixelRatio||1;
 function rs(){W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);wv.width=wv.clientWidth*dpr;wv.height=36*dpr;wx.setTransform(dpr,0,0,dpr,0,0)}
 rs();addEventListener('resize',rs);
-var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'rapide',mic:'moyen',hue:42,pitch:'normal',vname:''};
+var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'auto',web:1,mic:'moyen',hue:42,pitch:'normal',vname:''};
 try{Object.assign(cfg,JSON.parse(localStorage.getItem('julia_cfg2')||'{}'))}catch(e){}
+if(['auto','general','code'].indexOf(cfg.model)<0)cfg.model='auto';
 function save(){try{localStorage.setItem('julia_cfg2',JSON.stringify(cfg))}catch(e){}}
-var LG={FR:'Français',EN:'English',WO:'Wolof'},MD={rapide:'Qwen 1,5B',equilibre:'Qwen 3B'};
-var synth=window.speechSynthesis||null,spoken=0;
+var LG={FR:'Français',EN:'English',WO:'Wolof'},MD={auto:'Auto',general:'Général',code:'Code'};
+var spoken=0,vlist=[];
 var RATE={lente:0.85,normale:1,rapide:1.2},PITCH={grave:0.75,normal:1,aigu:1.3};
-function voicesFor(){return synth?synth.getVoices().filter(function(v){return (cfg.lang==='EN'?/^en/i:/^fr/i).test(v.lang)}):[]}
-function jsTTS(){return !!(synth&&voicesFor().length)}
-function pickVoice(){var vs=voicesFor();for(var i=0;i<vs.length;i++)if(vs[i].name===cfg.vname)return vs[i];return vs[0]||null}
-function srvSay(t){fetch('/api/speak',{method:'POST',body:JSON.stringify({text:t})}).catch(function(){})}
-function say(text){
-if(!text||!cfg.voice)return;
-if(!jsTTS()){srvSay(text);return}
-var u=new SpeechSynthesisUtterance(text),v=pickVoice();
-if(v){u.voice=v;u.lang=v.lang}else u.lang='fr-FR';
-u.rate=RATE[cfg.speed]||1;u.pitch=PITCH[cfg.pitch]||1;
-u.onerror=function(){srvSay(text)};
-synth.speak(u)}
-if(synth)synth.onvoiceschanged=function(){paint()};
+function loadVoices(){fetch('/api/voices?lang='+cfg.lang).then(function(r){return r.json()}).then(function(d){vlist=d.voices||[];paint()}).catch(function(){})}
+function say(text){if(!text||!cfg.voice)return;fetch('/api/speak',{method:'POST',body:JSON.stringify({text:text,pitch:PITCH[cfg.pitch]||1,rate:RATE[cfg.speed]||1,lang:cfg.lang,voice:cfg.vname})}).catch(function(){})}
+function stopSpeech(){fetch('/api/speak/stop',{method:'POST',body:'{}'}).catch(function(){})}
 
 function paint(){
 document.querySelectorAll('.tg').forEach(function(e){e.classList.toggle('on',!!cfg[e.dataset.k])});
 document.querySelectorAll('[data-seg]').forEach(function(g){g.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',cfg[g.dataset.seg]===b.dataset.v)})});
-var vb=document.getElementById('vbtn'),vs=voicesFor(),vi=0;for(var k=0;k<vs.length;k++)if(vs[k].name===cfg.vname)vi=k;
+var vb=document.getElementById('vbtn'),vs=vlist,vi=0;for(var k=0;k<vs.length;k++)if(vs[k].name===cfg.vname)vi=k;
 if(vb)vb.textContent=vs.length?('Voix '+(vi+1)+'/'+vs.length):'Système';
 document.getElementById('lg').textContent=LG[cfg.lang];document.getElementById('mdl').textContent=MD[cfg.model];
 document.querySelectorAll('#sw b').forEach(function(s){s.style.borderColor=+s.dataset.h===cfg.hue?'#fff':'transparent'})}
 [[42,'55%'],[200,'55%'],[150,'50%'],[320,'60%']].forEach(function(c){var s=document.createElement('b');s.dataset.h=c[0];s.style.cssText='width:26px;height:26px;border-radius:50%;background:hsl('+c[0]+',85%,'+c[1]+');border:2px solid transparent;cursor:pointer';s.onclick=function(){cfg.hue=c[0];save();paint()};document.getElementById('sw').appendChild(s)});
 document.querySelectorAll('.tg').forEach(function(e){e.onclick=function(){cfg[e.dataset.k]=cfg[e.dataset.k]?0:1;save();paint()}});
-document.querySelectorAll('[data-seg]').forEach(function(g){g.querySelectorAll('button').forEach(function(b){b.onclick=function(){cfg[g.dataset.seg]=b.dataset.v;save();paint()}})});
+document.querySelectorAll('[data-seg]').forEach(function(g){g.querySelectorAll('button').forEach(function(b){b.onclick=function(){cfg[g.dataset.seg]=b.dataset.v;save();paint();if(g.dataset.seg==='lang')loadVoices()}})});
 var wipe=document.getElementById('wipe'),wt;
 wipe.onclick=function(){if(wipe.textContent==='Effacer'){wipe.textContent='Confirmer';wt=setTimeout(function(){wipe.textContent='Effacer'},3000)}else{clearTimeout(wt);wipe.textContent='Effacé';fetch('/api/memory/clear',{method:'POST'}).then(function(){memLoad()}).catch(function(){});setTimeout(function(){wipe.textContent='Effacer'},1500)}};
-document.getElementById('gear').onclick=function(){document.getElementById('pn').style.transform='translateX(0)'};
+document.getElementById('gear').onclick=function(){document.getElementById('pn').style.transform='translateX(0)';loadVoices()};
 document.getElementById('cl').onclick=function(){document.getElementById('pn').style.transform='translateX(100%)'};
 paint();
 /* Scène : réseau de points reliés, arcs orbitaux, noyau, poussière */
@@ -115,19 +107,22 @@ tmr.push(setTimeout(function(){setState('rest')},12500))}
 window.julia={setState:setState,setAmp:function(a){extAmp=a},setUser:function(s){uu.textContent=s},setReply:function(s){jj.textContent=s},respond:function(){resp=1},demo:demo,config:cfg};
 function fail(m){setState('rest');jj.style.color='#e0a070';jj.textContent='Erreur : '+m}
 function askBrain(text){
-spoken=0;if(synth)synth.cancel();
-fetch('/api/ask',{method:'POST',body:JSON.stringify({text:text,lang:cfg.lang,voice:jsTTS()?0:cfg.voice,mem:cfg.mem})}).then(function(r){return r.json()}).then(function(){genPoll(0,false)}).catch(function(){fail('réponse indisponible')})}
+spoken=0;stopSpeech();
+fetch('/api/ask',{method:'POST',body:JSON.stringify({text:text,lang:cfg.lang,voice:0,mem:cfg.mem,web:cfg.web,model:cfg.model})}).then(function(r){return r.json()}).then(function(){genPoll(0,false)}).catch(function(){fail('réponse indisponible')})}
+function speakable(t){return t.replace(/```[\s\S]*?(```|$)/g,' (le code est à l\'écran) ')}
 function genPoll(n,started){
 fetch('/api/gen').then(function(r){return r.json()}).then(function(g){
+if(g.model)document.getElementById('mdl').textContent=g.model==='code'?'Code':'Général';
+if(g.stage==='search'&&!started)jj.textContent='Julia cherche sur Internet…';
 if(g.text&&!started){setState('speak');started=true}
-if(started)jj.textContent=g.text;
-if(jsTTS()&&cfg.voice){
-var rest=g.text.slice(spoken),re=/[^.!?…\n]*[.!?…\n]+\s*/g,m;
+if(started){jj.textContent=g.text+(g.done&&g.truncated?' … dis « continue »':'');jj.parentNode.scrollTop=jj.parentNode.scrollHeight}
+if(cfg.voice){
+var sp=speakable(g.text),rest=sp.slice(spoken),re=/[^.!?…\n]*[.!?…\n]+\s*/g,m;
 while((m=re.exec(rest))&&m[0].trim().length>2){say(m[0].trim());spoken+=m[0].length}
 }
-if(!g.done&&n<450){tmr.push(setTimeout(function(){genPoll(n+1,started)},200));return}
+if(!g.done&&n<900){tmr.push(setTimeout(function(){genPoll(n+1,started)},200));return}
 if(!started){setState('speak');jj.textContent=g.text||'…'}
-if(jsTTS()&&cfg.voice){var r2=g.text.slice(spoken).trim();if(r2)say(r2);spoken=g.text.length}
+if(cfg.voice){var sp2=speakable(g.text),r2=sp2.slice(spoken).trim();if(r2)say(r2);spoken=sp2.length}
 memLoad();
 tmr.push(setTimeout(function(){setState('rest')},Math.max(2500,g.text.length*70)))
 }).catch(function(){fail('réponse indisponible')})}
@@ -153,10 +148,11 @@ var kb=document.getElementById("kb"),kin=document.getElementById("kin");
 document.getElementById("kbtn").onclick=function(){var open=kb.style.display!=="flex";kb.style.display=open?"flex":"none";if(open)kin.focus()};
 function sendText(){var v=kin.value.trim();if(!v||state!=="rest")return;kin.value="";kb.style.display="none";kin.blur();clearTimers();uu.textContent=v;jj.style.color="#f3e3c3";jj.textContent="Julia réfléchit…";setState("think");askBrain(v)}
 document.getElementById("ksend").onclick=sendText;
+loadVoices();setTimeout(loadVoices,4000);
 kin.addEventListener("keydown",function(e){if(e.key==="Enter")sendText()});
-document.getElementById("vbtn").onclick=function(){var vs=voicesFor();if(!vs.length){this.textContent="Aucune voix";return}
-var i=-1;for(var k=0;k<vs.length;k++)if(vs[k].name===cfg.vname)i=k;
-cfg.vname=vs[(i+1)%vs.length].name;save();paint();synth.cancel();say(cfg.lang==="EN"?"Hi, I am Julia.":"Salut, moi c'est Julia.")};
+document.getElementById("vbtn").onclick=function(){if(!vlist.length){this.textContent="Voix système";loadVoices();return}
+var i=-1;for(var k=0;k<vlist.length;k++)if(vlist[k]===cfg.vname)i=k;
+cfg.vname=vlist[(i+1)%vlist.length];save();paint();stopSpeech();say(cfg.lang==="EN"?"Hi, I am Julia.":"Salut, moi c'est Julia.")};
 
 var mp=document.getElementById("mp"),ml=document.getElementById("mlist");
 function esc(s){return String(s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]})}
