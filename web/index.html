@@ -34,16 +34,19 @@ canvas#c{position:absolute;inset:0;width:100%;height:100%}
 <div style="text-align:center;min-height:78px;margin-bottom:6px">
 <p id="u" style="margin:0 0 6px;font-size:13px;color:#b39a70;line-height:1.5"></p>
 <p id="j" style="margin:0;font-size:16px;line-height:1.5"></p></div>
+<div id="kb" style="display:none;gap:8px;margin-bottom:10px"><input id="kin" type="text" enterkeyhint="send" autocomplete="off" placeholder="Écris à Julia…" style="flex:1;min-width:0;background:rgba(255,255,255,.06);color:#f3e3c3;border:0.5px solid rgba(255,200,110,.32);border-radius:10px;padding:10px 12px;font-size:16px;font-family:inherit;-webkit-user-select:text;user-select:text"><button id="ksend" class="b" aria-label="Envoyer" style="padding:0 14px">Envoyer</button></div>
 <canvas id="wv" style="width:100%;height:36px;display:block;margin-bottom:14px"></canvas>
 <div style="display:flex;justify-content:center;align-items:center;gap:30px">
 <button id="brain" class="b" aria-label="Mémoire" style="border-radius:50%;width:46px;height:46px;padding:0"><svg class="ic" viewBox="0 0 24 24"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V5a2 2 0 0 0-3-1zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1"/></svg></button>
 <button id="mic" class="b" aria-label="Parler" style="border-radius:50%;width:66px;height:66px;padding:0;border-width:2px;border-color:#f0a830"><svg class="ic" viewBox="0 0 24 24" style="width:28px;height:28px"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
-<button class="b" aria-label="Clavier" style="border-radius:50%;width:46px;height:46px;padding:0"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></button></div></div>
+<button id="kbtn" class="b" aria-label="Clavier" style="border-radius:50%;width:46px;height:46px;padding:0"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></button></div></div>
 <div id="mp" style="position:absolute;inset:0;z-index:2;background:rgba(7,4,3,.97);padding:calc(env(safe-area-inset-top,0px) + 16px) 20px 20px;overflow:auto;transform:translateX(-100%);transition:transform .25s"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:20px;font-weight:500">Mémoire</span><button id="mcl" class="b" aria-label="Fermer" style="padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div><div id="mlist"></div></div>
 <div id="pn">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:20px;font-weight:500">Paramètres</span><button id="cl" class="b" aria-label="Fermer" style="padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
 <div class="rw"><span>Voix de Julia</span><div class="tg" data-k="voice"><i></i></div></div>
 <div class="rw"><span>Vitesse de la voix</span><span data-seg="speed"><button class="b" data-v="lente">Lente</button> <button class="b" data-v="normale">Normale</button> <button class="b" data-v="rapide">Rapide</button></span></div>
+<div class="rw"><span>Ton de la voix</span><span data-seg="pitch"><button class="b" data-v="grave">Grave</button> <button class="b" data-v="normal">Normal</button> <button class="b" data-v="aigu">Aigu</button></span></div>
+<div class="rw"><span>Voix</span><button id="vbtn" class="b">Système</button></div>
 <div class="rw"><span>Langue</span><span data-seg="lang"><button class="b" data-v="FR">FR</button> <button class="b" data-v="EN">EN</button> <button class="b" data-v="WO">WO</button></span></div>
 <div class="rw"><span>Modèle IA</span><span data-seg="model"><button class="b" data-v="rapide">Rapide</button> <button class="b" data-v="equilibre">Équilibré</button></span></div>
 <div class="rw"><span>Sensibilité du micro</span><span data-seg="mic"><button class="b" data-v="bas">Bas</button> <button class="b" data-v="moyen">Moyen</button> <button class="b" data-v="haut">Haut</button></span></div>
@@ -56,13 +59,31 @@ var cv=document.getElementById('c'),ctx=cv.getContext('2d'),wv=document.getEleme
 var W,H,dpr=window.devicePixelRatio||1;
 function rs(){W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);wv.width=wv.clientWidth*dpr;wv.height=36*dpr;wx.setTransform(dpr,0,0,dpr,0,0)}
 rs();addEventListener('resize',rs);
-var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'rapide',mic:'moyen',hue:42};
+var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'rapide',mic:'moyen',hue:42,pitch:'normal',vname:''};
 try{Object.assign(cfg,JSON.parse(localStorage.getItem('julia_cfg2')||'{}'))}catch(e){}
 function save(){try{localStorage.setItem('julia_cfg2',JSON.stringify(cfg))}catch(e){}}
 var LG={FR:'Français',EN:'English',WO:'Wolof'},MD={rapide:'Qwen 1,5B',equilibre:'Qwen 3B'};
+var synth=window.speechSynthesis||null,spoken=0;
+var RATE={lente:0.85,normale:1,rapide:1.2},PITCH={grave:0.75,normal:1,aigu:1.3};
+function voicesFor(){return synth?synth.getVoices().filter(function(v){return (cfg.lang==='EN'?/^en/i:/^fr/i).test(v.lang)}):[]}
+function jsTTS(){return !!(synth&&voicesFor().length)}
+function pickVoice(){var vs=voicesFor();for(var i=0;i<vs.length;i++)if(vs[i].name===cfg.vname)return vs[i];return vs[0]||null}
+function srvSay(t){fetch('/api/speak',{method:'POST',body:JSON.stringify({text:t})}).catch(function(){})}
+function say(text){
+if(!text||!cfg.voice)return;
+if(!jsTTS()){srvSay(text);return}
+var u=new SpeechSynthesisUtterance(text),v=pickVoice();
+if(v){u.voice=v;u.lang=v.lang}else u.lang='fr-FR';
+u.rate=RATE[cfg.speed]||1;u.pitch=PITCH[cfg.pitch]||1;
+u.onerror=function(){srvSay(text)};
+synth.speak(u)}
+if(synth)synth.onvoiceschanged=function(){paint()};
+
 function paint(){
 document.querySelectorAll('.tg').forEach(function(e){e.classList.toggle('on',!!cfg[e.dataset.k])});
 document.querySelectorAll('[data-seg]').forEach(function(g){g.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',cfg[g.dataset.seg]===b.dataset.v)})});
+var vb=document.getElementById('vbtn'),vs=voicesFor(),vi=0;for(var k=0;k<vs.length;k++)if(vs[k].name===cfg.vname)vi=k;
+if(vb)vb.textContent=vs.length?('Voix '+(vi+1)+'/'+vs.length):'Système';
 document.getElementById('lg').textContent=LG[cfg.lang];document.getElementById('mdl').textContent=MD[cfg.model];
 document.querySelectorAll('#sw b').forEach(function(s){s.style.borderColor=+s.dataset.h===cfg.hue?'#fff':'transparent'})}
 [[42,'55%'],[200,'55%'],[150,'50%'],[320,'60%']].forEach(function(c){var s=document.createElement('b');s.dataset.h=c[0];s.style.cssText='width:26px;height:26px;border-radius:50%;background:hsl('+c[0]+',85%,'+c[1]+');border:2px solid transparent;cursor:pointer';s.onclick=function(){cfg.hue=c[0];save();paint()};document.getElementById('sw').appendChild(s)});
@@ -94,13 +115,19 @@ tmr.push(setTimeout(function(){setState('rest')},12500))}
 window.julia={setState:setState,setAmp:function(a){extAmp=a},setUser:function(s){uu.textContent=s},setReply:function(s){jj.textContent=s},respond:function(){resp=1},demo:demo,config:cfg};
 function fail(m){setState('rest');jj.style.color='#e0a070';jj.textContent='Erreur : '+m}
 function askBrain(text){
-fetch('/api/ask',{method:'POST',body:JSON.stringify({text:text,lang:cfg.lang,voice:cfg.voice,mem:cfg.mem})}).then(function(r){return r.json()}).then(function(){genPoll(0,false)}).catch(function(){fail('réponse indisponible')})}
+spoken=0;if(synth)synth.cancel();
+fetch('/api/ask',{method:'POST',body:JSON.stringify({text:text,lang:cfg.lang,voice:jsTTS()?0:cfg.voice,mem:cfg.mem})}).then(function(r){return r.json()}).then(function(){genPoll(0,false)}).catch(function(){fail('réponse indisponible')})}
 function genPoll(n,started){
 fetch('/api/gen').then(function(r){return r.json()}).then(function(g){
 if(g.text&&!started){setState('speak');started=true}
 if(started)jj.textContent=g.text;
+if(jsTTS()&&cfg.voice){
+var rest=g.text.slice(spoken),re=/[^.!?…\n]*[.!?…\n]+\s*/g,m;
+while((m=re.exec(rest))&&m[0].trim().length>2){say(m[0].trim());spoken+=m[0].length}
+}
 if(!g.done&&n<450){tmr.push(setTimeout(function(){genPoll(n+1,started)},200));return}
 if(!started){setState('speak');jj.textContent=g.text||'…'}
+if(jsTTS()&&cfg.voice){var r2=g.text.slice(spoken).trim();if(r2)say(r2);spoken=g.text.length}
 memLoad();
 tmr.push(setTimeout(function(){setState('rest')},Math.max(2500,g.text.length*70)))
 }).catch(function(){fail('réponse indisponible')})}
@@ -122,6 +149,15 @@ uu.textContent=d.text;setState('think');jj.textContent='Julia réfléchit…';
 askBrain(d.text)
 }).catch(function(){fail('serveur injoignable')})}
 mic.onclick=startListen;jj.textContent='Touche la sphère ou le micro pour parler';jj.style.color='#b39a70';
+var kb=document.getElementById("kb"),kin=document.getElementById("kin");
+document.getElementById("kbtn").onclick=function(){var open=kb.style.display!=="flex";kb.style.display=open?"flex":"none";if(open)kin.focus()};
+function sendText(){var v=kin.value.trim();if(!v||state!=="rest")return;kin.value="";kb.style.display="none";kin.blur();clearTimers();uu.textContent=v;jj.style.color="#f3e3c3";jj.textContent="Julia réfléchit…";setState("think");askBrain(v)}
+document.getElementById("ksend").onclick=sendText;
+kin.addEventListener("keydown",function(e){if(e.key==="Enter")sendText()});
+document.getElementById("vbtn").onclick=function(){var vs=voicesFor();if(!vs.length){this.textContent="Aucune voix";return}
+var i=-1;for(var k=0;k<vs.length;k++)if(vs[k].name===cfg.vname)i=k;
+cfg.vname=vs[(i+1)%vs.length].name;save();paint();synth.cancel();say(cfg.lang==="EN"?"Hi, I am Julia.":"Salut, moi c'est Julia.")};
+
 var mp=document.getElementById("mp"),ml=document.getElementById("mlist");
 function esc(s){return String(s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]})}
 function memLoad(cb){fetch("/api/memory").then(function(r){return r.json()}).then(function(d){var n=d.count;document.getElementById("cnt").textContent=n+" souvenir"+(n>1?"s":"");if(cb)cb(d)}).catch(function(){})}

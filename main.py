@@ -291,6 +291,10 @@ class H(SimpleHTTPRequestHandler):
             data = json.loads(self.rfile.read(n) or b'{}')
         except Exception:
             data = {}
+        if self.path == '/api/speak':
+            if tts is not None:
+                threading.Thread(target=_speak, args=(str(data.get('text', '')),), daemon=True).start()
+            return self._json({'ok': True})
         if self.path == '/api/ask':
             return self._json(start_ask(data))
         if self.path == '/api/memory/clear':
