@@ -115,7 +115,8 @@ fetch('/api/gen').then(function(r){return r.json()}).then(function(g){
 if(g.model)document.getElementById('mdl').textContent=g.model==='code'?'Code':'Général';
 if(g.stage==='search'&&!started)jj.textContent='Julia cherche sur Internet…';
 if(g.text&&!started){setState('speak');started=true}
-if(started){jj.textContent=g.text+(g.done&&g.truncated?' … dis « continue »':'');jj.parentNode.scrollTop=jj.parentNode.scrollHeight}
+if(started){var ex='';if(g.done){if(g.web_status==='ok'&&g.sources&&g.sources.length)ex+='\n— '+g.sources[0];else if(g.web_status==='stale')ex+='\n(information enregistrée, non vérifiée)';else if(g.web_status==='fail'&&g.web_error)ex+='\n(Internet indisponible : '+g.web_error+')'}
+jj.style.whiteSpace='pre-line';jj.textContent=g.text+(g.done&&g.truncated?' … dis « continue »':'')+ex;jj.parentNode.scrollTop=jj.parentNode.scrollHeight}
 if(cfg.voice){
 var sp=speakable(g.text),rest=sp.slice(spoken),re=/[^.!?…\n]*[.!?…\n]+\s*/g,m;
 while((m=re.exec(rest))&&m[0].trim().length>2){say(m[0].trim());spoken+=m[0].length}
@@ -161,11 +162,15 @@ function memRender(d){
 var h="<p style='color:#b39a70;font-size:13px'>Ce que Julia a retenu de toi</p>";
 if(!d.facts.length)h+="<p style='font-size:14px'>Rien pour l'instant.</p>";
 d.facts.forEach(function(f){h+="<div class='rw'><span>"+esc(f.text)+"</span><button class='b' data-id='"+f.id+"' style='padding:4px 9px'>Suppr.</button></div>"});
+h+="<p style='color:#b39a70;font-size:13px;margin-top:18px'>Ce que Julia a appris sur Internet</p>";
+if(!d.web||!d.web.length)h+="<p style='font-size:14px'>Rien pour l'instant.</p>";
+(d.web||[]).forEach(function(w,i){h+="<div class='rw'><span style='font-size:13px;line-height:1.4'>"+esc(w.title)+"<br><span style='color:#b39a70'>"+esc(w.snippet)+"</span></span><button class='b' data-wi='"+i+"' style='padding:4px 9px;flex:none'>Suppr.</button></div>"});
 h+="<p style='color:#b39a70;font-size:13px;margin-top:18px'>Derniers échanges</p>";
 if(!d.recent.length)h+="<p style='font-size:14px'>Aucun échange enregistré.</p>";
 d.recent.forEach(function(r){h+="<p style='font-size:13px;line-height:1.5;margin:8px 0'><span style='color:#b39a70'>"+(r.role==="user"?"Toi":"Julia")+" :</span> "+esc(r.text)+"</p>"});
 ml.innerHTML=h;
-ml.querySelectorAll("button[data-id]").forEach(function(b){b.onclick=function(){fetch("/api/memory/delete",{method:"POST",body:JSON.stringify({id:+b.dataset.id})}).then(function(){memLoad(memRender)})}})}
+ml.querySelectorAll("button[data-id]").forEach(function(b){b.onclick=function(){fetch("/api/memory/delete",{method:"POST",body:JSON.stringify({id:+b.dataset.id})}).then(function(){memLoad(memRender)})}});
+ml.querySelectorAll("button[data-wi]").forEach(function(b){b.onclick=function(){fetch("/api/memory/forget",{method:"POST",body:JSON.stringify({q:d.web[+b.dataset.wi].q})}).then(function(){memLoad(memRender)})}})}
 document.getElementById("brain").onclick=function(){mp.style.transform="translateX(0)";memLoad(memRender)};
 document.getElementById("mcl").onclick=function(){mp.style.transform="translateX(-100%)"};
 memLoad();
