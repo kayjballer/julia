@@ -1,4 +1,4 @@
-import os, json, threading, time, re, sqlite3, ssl, html, math, unicodedata, datetime
+import os, json, threading, time, re, sqlite3, ssl, html, math, unicodedata, datetime, concurrent.futures
 import urllib.request, urllib.parse
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -11,7 +11,7 @@ CODER = 'http://127.0.0.1:8081'
 NOBRAIN = "Mon cerveau n'est pas lancé. Ouvre Termux et lance julia_brain.sh."
 ST = {'active': False, 't0': 0.0, 'err': None}
 GEN = {'id': 0, 'text': '', 'done': True, 'brain': True, 'stage': '', 'model': 'general', 'truncated': False,
-       'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False}
+       'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None}
 LASTWEB = {'ts': 0, 'ctx': '', 'sources': []}
 VOUS = re.compile(r"\b(vous|votre|vos)\b", re.I)
 CODE_RE = re.compile(r"\b(code|coder|coding|python|javascript|java|html|css|bash|shell|termux|linux|script|fonction|"
@@ -23,6 +23,7 @@ ENCYC = re.compile(r"(c'est qui|qui est|qui était|qui sont|qu'est-ce que|qu'est
 FRESH = re.compile(r"\b(aujourd'hui|actualités?|dernier|derniers|dernière|récent|maintenant|en ce moment|météo|score|"
                    r"résultats?|prix|cours|combien coûte|président|premier ministre|sortie|news)\b", re.I)
 QWORD = re.compile(r"^\s*(qui|quel|quelle|quels|quelles|quand|où|combien|en quelle année|de quand)\b", re.I)
+DATEQ = re.compile(r"\b(aujourd'hui|demain|hier|ce soir|ce matin|cette semaine|ce mois|cette année|maintenant|actuel|en ce moment|dans \d+)", re.I)
 EXPL = re.compile(r"\b(cherche|recherche|google|sur internet|sur le web|vérifie)\b", re.I)
 
 def make_ctx():
@@ -276,19 +277,24 @@ def live_search(q, mode, year):
     if mode != 'fresh':
         order = [order[2], order[0], order[1]]
     chunks, errors, vides = [], [], 0
-    for name, fn in order:
-        try:
-            res = fn(q if name == 'wiki' else qs)
-        except Exception as e:
-            errors.append(name + ': ' + err_short(e))
-            continue
-        if res:
-            chunks += res
-        else:
-            vides += 1
-        if chunks and (mode != 'fresh' or len(chunks) >= 6):
-            break
-    return chunks, ' ; '.join(errors)[:160], bool(errors) and not chunks and vides == 0
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+    try:
+        futs = [(name, ex.submit(fn, q if name == 'wiki' else qs)) for name, fn in order]
+        for name, f in futs:
+            try:
+                res = f.result(timeout=12)
+            except Exception as e:
+                errors.append(name + ': ' + err_short(e))
+                continue
+            if res:
+                chunks += res
+            else:
+                vides += 1
+            if chunks and mode != 'fresh':
+                break
+    finally:
+        ex.shutdown(wait=False)
+    return chunks[:8], ' ; '.join(errors)[:160], bool(errors) and not chunks and vides == 0
 
 
 def rag(text, mode, year):
@@ -307,8 +313,9 @@ def rag(text, mode, year):
             hits, status = old, 'stale'
     if not hits:
         return {'ctx': '', 'sources': [], 'status': 'fail' if all_failed else 'empty', 'error': err, 'age': 0}
-    top = hits[:3]
-    ctx = '\n'.join('[%s] %s' % (h[2]['title'], h[2]['text'][:500]) for h in top)[:1400]
+    best = hits[0][0]
+    top = [h for h in hits if h[0] >= 0.6 * best][:3]
+    ctx = '\n'.join('[%s] %s' % (h[2]['title'][:60], h[2]['text'][:420]) for h in top)[:1200]
     srcs = []
     for h in top:
         if h[2]['title'] not in srcs:
@@ -350,8 +357,7 @@ def system_prompt(lang, facts, code, dt):
         s = ("You are Julia, a warm and direct local voice assistant. Always answer in English. "
              "Usually answer in 1 to 3 short spoken sentences, no lists, no emojis. If asked for a story, an "
              "explanation or details, you may expand in one short paragraph (6 sentences max). "
-             "If you don't know, say so instead of guessing. Current date and time: %s."
-             % dt.strftime('%A %B %d %Y, %H:%M'))
+             "If you don't know, say so instead of guessing.")
         if code:
             s += " For code, give a short block then explain in one sentence what it does."
         if facts:
@@ -361,8 +367,7 @@ def system_prompt(lang, facts, code, dt):
          "sans emojis, comme à l'oral. En général tu réponds en 1 à 3 phrases courtes, sans listes. "
          "Si on te demande une histoire, une explication ou des détails, tu peux développer en un court "
          "paragraphe (6 phrases maximum). Tu tutoies toujours l'utilisateur, même s'il te vouvoie. "
-         "Si tu ne sais pas, dis-le simplement au lieu d'inventer. "
-         "Date et heure actuelles : %s, %dh%02d." % (fr_date(dt), dt.hour, dt.minute))
+         "Si tu ne sais pas, dis-le simplement au lieu d'inventer.")
     if code:
         s += (" Pour le code, donne un court bloc de code, puis explique en une phrase ce qu'il fait, "
               "sans lire le code à voix haute.")
@@ -383,7 +388,7 @@ NOTFOUND = {'FR': "Je n'ai pas trouvé cette information de façon fiable dans m
             'EN': "I couldn't find that reliably in my sources, so I'd rather not answer from memory."}
 
 
-def user_content(text, lang, web, note, code):
+def user_content(text, lang, web, note, code, dt=None):
     if lang == 'EN':
         head = ("Excerpts found (sources):\n%s\n\nQuestion: " % web) if web else ''
         tail = ("(Answer only from these excerpts, in 1 to 3 short sentences. If the answer is not in them, say "
@@ -397,7 +402,11 @@ def user_content(text, lang, web, note, code):
             tail = "(Réponds en français, en me tutoyant.)"
         else:
             tail = "(Réponds en quelques phrases courtes, en me tutoyant.)"
-    return head + text + "\n" + tail + (("\n" + note) if note else '')
+    dl = ''
+    if dt is not None and (web or DATEQ.search(text) or FRESH.search(text)):
+        dl = ("\n(Now: %s.)" % dt.strftime('%A %B %d %Y, %H:%M')) if lang == 'EN' else \
+             ("\n(Nous sommes le %s, %dh%02d.)" % (fr_date(dt), dt.hour, dt.minute))
+    return head + text + "\n" + tail + dl + (("\n" + note) if note else '')
 
 
 def build_messages(text, lang, mem, web, note, code, dt):
@@ -406,7 +415,9 @@ def build_messages(text, lang, mem, web, note, code, dt):
         for f in extract_facts(text):
             sql('INSERT OR IGNORE INTO facts(ts,text) VALUES(?,?)', (time.time(), f))
         facts = [r['text'] for r in sql('SELECT text FROM facts ORDER BY id DESC LIMIT 12', fetch=True)]
-        rows = sql('SELECT role,text FROM conv ORDER BY id DESC LIMIT 12', fetch=True)[::-1]
+        nu = sql("SELECT COUNT(*) AS n FROM conv WHERE role='user'", fetch=True)[0]['n']
+        start = 0 if nu <= 8 else ((nu - 4) // 4) * 4
+        rows = sql('SELECT role,text FROM conv ORDER BY id LIMIT 16 OFFSET ?', (start * 2,), fetch=True)
         pairs, i = [], 0
         while i + 1 < len(rows):
             if rows[i]['role'] == 'user' and rows[i + 1]['role'] == 'assistant':
@@ -414,12 +425,12 @@ def build_messages(text, lang, mem, web, note, code, dt):
                 i += 2
             else:
                 i += 1
-        for u, a in pairs[-3:]:
+        for u, a in pairs:
             if lang == 'EN' or not VOUS.search(a):
                 hist += [{'role': 'user', 'content': u}, {'role': 'assistant', 'content': a}]
     shot = [] if code else (SHOT_EN if lang == 'EN' else SHOT_FR)
     return [{'role': 'system', 'content': system_prompt(lang, facts, code, dt)}] + shot + hist + \
-           [{'role': 'user', 'content': user_content(text, lang, web, note, code)}]
+           [{'role': 'user', 'content': user_content(text, lang, web, note, code, dt)}]
 
 
 TUTOIE = [(r"\bpuis-je vous aider\b", "puis-je t'aider"), (r"\bvous aider\b", "t'aider"), (r"\bje vous\b", "je te"),
@@ -490,6 +501,7 @@ def finish_direct(gid, out, voice, lang, status='none', err=''):
 
 
 def generate(gid, text, lang, voice, mem, web, pref, dt):
+    t0 = time.time()
     if lang != 'EN' and CLOCK.search(text):
         return finish_direct(gid, clock_answer(text, dt), voice, lang)
     model = pick(text, pref)
@@ -522,6 +534,8 @@ def generate(gid, text, lang, voice, mem, web, pref, dt):
 
     def sink(d):
         if GEN['id'] == gid:
+            if GEN['ttft'] is None:
+                GEN['ttft'] = round(time.time() - t0, 1)
             buf.append(d)
             if not hold:
                 GEN['text'] = ''.join(buf) if lang == 'EN' else tutoie(''.join(buf))
@@ -557,7 +571,7 @@ def generate(gid, text, lang, voice, mem, web, pref, dt):
         out = trim_sentence(out)
     if not out:
         out = "Je n'ai pas de réponse pour l'instant." if ok else NOBRAIN
-    GEN.update(text=out, brain=ok, truncated=truncated, stage='', hold=False)
+    GEN.update(text=out, brain=ok, truncated=truncated, stage='', hold=False, dur=round(time.time() - t0, 1))
     if mem and ok:
         now = time.time()
         sql('INSERT INTO conv(ts,role,text) VALUES(?,?,?)', (now, 'user', text))
@@ -571,7 +585,7 @@ def start_ask(data):
     GEN['id'] += 1
     gid = GEN['id']
     GEN.update(text='', done=False, brain=True, stage='', truncated=False, web_status='none', web_error='',
-               sources=[], hold=False)
+               sources=[], hold=False, ttft=None, dur=None)
     threading.Thread(target=generate, daemon=True,
                      args=(gid, str(data.get('text', '')), data.get('lang', 'FR'), data.get('voice', 0),
                            data.get('mem', 1), data.get('web', 1), data.get('model', 'auto'),
@@ -583,7 +597,8 @@ def gen_state():
     t = GEN['text'] if GEN['done'] else ('' if GEN['hold'] else clean_think(GEN['text']))
     return {'text': t, 'done': GEN['done'], 'brain': GEN['brain'], 'id': GEN['id'],
             'stage': GEN['stage'], 'model': GEN['model'], 'truncated': GEN['truncated'],
-            'web_status': GEN['web_status'], 'web_error': GEN['web_error'], 'sources': GEN['sources']}
+            'web_status': GEN['web_status'], 'web_error': GEN['web_error'], 'sources': GEN['sources'],
+            'ttft': GEN['ttft'], 'dur': GEN['dur']}
 
 
 def memory_info():
@@ -808,8 +823,29 @@ class H(SimpleHTTPRequestHandler):
         pass
 
 
+def warmup():
+    for _ in range(120):
+        try:
+            urllib.request.urlopen(GENERAL + '/health', timeout=2).read()
+            break
+        except Exception:
+            time.sleep(5)
+    else:
+        return
+    try:
+        msgs = build_messages('Bonjour', 'FR', 1, '', '', False, datetime.datetime.now())
+        msgs[-1] = {'role': 'user', 'content': '.'}
+        body = json.dumps({'messages': msgs, 'max_tokens': 1, 'stream': False, 'cache_prompt': True}).encode()
+        req = urllib.request.Request(GENERAL + '/v1/chat/completions', data=body,
+                                     headers={'Content-Type': 'application/json'})
+        urllib.request.urlopen(req, timeout=300).read()
+    except Exception:
+        pass
+
+
 if ANDROID:
     _native_make()
 
 if not os.environ.get('JULIA_NOSERVER'):
+    threading.Thread(target=warmup, daemon=True).start()
     ThreadingHTTPServer(('127.0.0.1', 5000), H).serve_forever()

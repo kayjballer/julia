@@ -50,6 +50,7 @@ canvas#c{position:absolute;inset:0;width:100%;height:100%}
 <div class="rw"><span>Langue</span><span data-seg="lang"><button class="b" data-v="FR">FR</button> <button class="b" data-v="EN">EN</button> <button class="b" data-v="WO">WO</button></span></div>
 <div class="rw"><span>Modèle IA</span><span data-seg="model"><button class="b" data-v="auto">Auto</button> <button class="b" data-v="general">Général</button> <button class="b" data-v="code">Code</button></span></div>
 <div class="rw"><span>Accès à Internet</span><div class="tg" data-k="web"><i></i></div></div>
+<div class="rw"><span>Afficher les temps de réponse</span><div class="tg" data-k="dbg"><i></i></div></div>
 <div class="rw"><span>Sensibilité du micro</span><span data-seg="mic"><button class="b" data-v="bas">Bas</button> <button class="b" data-v="moyen">Moyen</button> <button class="b" data-v="haut">Haut</button></span></div>
 <div class="rw"><span>Mémoire automatique</span><div class="tg" data-k="mem"><i></i></div></div>
 <div class="rw"><span>Effacer la mémoire</span><button id="wipe" class="b" style="border-color:#e26a6a;color:#f0a0a0">Effacer</button></div>
@@ -60,7 +61,7 @@ var cv=document.getElementById('c'),ctx=cv.getContext('2d'),wv=document.getEleme
 var W,H,dpr=window.devicePixelRatio||1;
 function rs(){W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);wv.width=wv.clientWidth*dpr;wv.height=36*dpr;wx.setTransform(dpr,0,0,dpr,0,0)}
 rs();addEventListener('resize',rs);
-var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'auto',web:1,mic:'moyen',hue:42,pitch:'normal',vname:''};
+var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'auto',web:1,dbg:0,mic:'moyen',hue:42,pitch:'normal',vname:''};
 try{Object.assign(cfg,JSON.parse(localStorage.getItem('julia_cfg2')||'{}'))}catch(e){}
 if(['auto','general','code'].indexOf(cfg.model)<0)cfg.model='auto';
 function save(){try{localStorage.setItem('julia_cfg2',JSON.stringify(cfg))}catch(e){}}
@@ -116,7 +117,7 @@ if(g.model)document.getElementById('mdl').textContent=g.model==='code'?'Code':'G
 if(g.stage==='search'&&!started)jj.textContent='Julia cherche sur Internet…';
 if(g.text&&!started){setState('speak');started=true}
 if(started){var ex='';if(g.done){if(g.web_status==='ok'&&g.sources&&g.sources.length)ex+='\n— '+g.sources.slice(0,2).join(' · ');else if(g.web_status==='stale')ex+='\n(information enregistrée, non vérifiée)';else if(g.web_status==='fail'&&g.web_error)ex+='\n(Internet indisponible : '+g.web_error+')';else if(g.web_status==='empty')ex+='\n(rien de fiable trouvé sur Internet)'}
-jj.style.whiteSpace='pre-line';jj.textContent=g.text+(g.done&&g.truncated?' … dis « continue »':'')+ex;jj.parentNode.scrollTop=jj.parentNode.scrollHeight}
+jj.style.whiteSpace='pre-line';jj.textContent=g.text+(g.done&&g.truncated?' … dis « continue »':'')+ex+(cfg.dbg&&g.done&&g.dur!=null?'\n⏱ 1er mot '+(g.ttft!=null?g.ttft:'-')+' s · total '+g.dur+' s':'');jj.parentNode.scrollTop=jj.parentNode.scrollHeight}
 if(cfg.voice){
 var sp=speakable(g.text),rest=sp.slice(spoken),re=/[^.!?…\n]*[.!?…\n]+\s*/g,m;
 while((m=re.exec(rest))&&m[0].trim().length>2){say(m[0].trim());spoken+=m[0].length}
