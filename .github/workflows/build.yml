@@ -1,57 +1,141 @@
-name: Build APK
+name: Julia v13 - Android Qwen natif
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - v13-qwen-local
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout Julia
+        uses: actions/checkout@v4
 
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Installer Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
 
-    - uses: actions/setup-java@v5
-      with:
-        distribution: 'temurin'
-        java-version: '17'
+      - name: Installer Android SDK
+        uses: android-actions/setup-android@v3
 
-    - name: Installer les dépendances
-      run: |
-        sudo apt update
-        sudo apt install -y git zip unzip openjdk-17-jdk python3-pip \
-          autoconf automake libtool pkg-config zlib1g-dev \
-          libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev \
-          g++ gcc make
+      - name: Installer NDK 29
+        run: |
+          sdkmanager "ndk;29.0.14206865"
+          echo "ANDROID_NDK=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
-    - name: Installer Buildozer
-      run: |
-        pip install --upgrade pip
-        pip install buildozer "cython<3.0"
+      - name: Cloner llama.cpp
+        run: |
+          git clone https://github.com/ggml-org/llama.cpp.git third_party/llama.cpp
+          cd third_party/llama.cpp
+          git checkout dd26785c
 
-    - name: Construire l'APK
-      run: |
-        set -o pipefail
-        buildozer android debug 2>&1 | tee /tmp/build.log | tail -200
-        exit ${PIPESTATUS[0]}
+      - name: Compiler llama.cpp pour Android ARM64
+        run: |
+          cmake -B third_party/llama.cpp/build-android \
+            -S third_party/llama.cpp \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-28 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DLLAMA_BUILD_APP=OFF \
+            -DLLAMA_BUILD_COMMON=OFF \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_OPENSSL=OFF \
+            -DGGML_NATIVE=OFF \
+            -DGGML_BACKEND_DL=ON \
+            -DGGML_CPU_ALL_VARIANTS=ON \
+            -DGGML_OPENMP=OFF \
+            -DGGML_LLAMAFILE=OFF
 
-    - name: Upload APK
-      if: success()
-      uses: actions/upload-artifact@v4
-      with:
-        name: julia-apk
-        path: bin/*.apk
+          cmake --build third_party/llama.cpp/build-android \
+            --config Release \
+            -j "$(nproc)"
 
-    - name: Upload log (si échec)
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-log
-        path: /tmp/build.log
-        if-no-files-found: ignore
+      - name: Préparer les bibliothèques natives
+        run: |
+          mkdir -p native/android-libs
+
+          cp third_party/llama.cpp/build-android/bin/libllama.so \
+            native/android-libs/
+
+          cp third_party/llama.cpp/build-android/bin/libggml.so \
+            native/android-libs/
+
+          cp third_party/llama.cpp/build-android/bin/libggml-base.so \
+            native/android-libs/
+
+          cp third_party/llama.cpp/build-android/bin/libggml-cpu.so \
+            native/android-libs/
+
+      - name: Compiler le wrapper Julia Qwen
+        run: |
+          "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" \
+            --target=aarch64-linux-android28 \
+            -shared \
+            -fPIC \
+            -Ithird_party/llama.cpp/include \
+            -Lthird_party/llama.cpp/build-android/bin \
+            -Wl,-rpath,'$ORIGIN' \
+            -o native/android-libs/libjulia_qwen.so \
+            native/julia_qwen/julia_qwen.cpp \
+            -lllama
+
+      - name: Vérifier les bibliothèques Android
+        run: |
+          echo "=== LIBS ==="
+          ls -lh native/android-libs/
+
+          echo "=== ARCHITECTURE ==="
+          readelf -h native/android-libs/libjulia_qwen.so | grep -E 'Class|Machine'
+
+          echo "=== DEPENDANCES WRAPPER ==="
+          readelf -d native/android-libs/libjulia_qwen.so | grep NEEDED
+
+      - name: Installer Buildozer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git zip unzip \
+            autoconf automake libtool pkg-config \
+            zlib1g-dev libncurses5-dev \
+            cmake libffi-dev libssl-dev \
+            g++ gcc make
+
+          python3 -m pip install --upgrade pip
+          python3 -m pip install buildozer "cython<3.0"
+
+      - name: Construire l'APK
+        run: |
+          buildozer android debug 2>&1 | tee /tmp/build.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: julia-apk
+          path: bin/*.apk
+
+      - name: Upload bibliothèques Android
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: julia-qwen-android-libs
+          path: native/android-libs/*.so
+
+      - name: Upload log si échec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: /tmp/build.log
+          if-no-files-found: ignore
