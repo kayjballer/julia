@@ -23,7 +23,7 @@ jobs:
           java-version: '17'
 
       - name: Installer Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Installer NDK 29
         run: |
