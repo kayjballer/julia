@@ -34,7 +34,6 @@ jobs:
         run: |
           git clone https://github.com/ggml-org/llama.cpp.git third_party/llama.cpp
           cd third_party/llama.cpp
-          git checkout dd26785c
 
       - name: Compiler llama.cpp pour Android ARM64
         run: |
