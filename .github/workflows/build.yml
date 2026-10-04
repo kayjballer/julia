@@ -63,17 +63,14 @@ jobs:
         run: |
           mkdir -p native/android-libs
 
-          cp third_party/llama.cpp/build-android/bin/libllama.so \
-            native/android-libs/
+          echo "=== LIBRAIRIES PRODUITES PAR LLAMA.CPP ==="
+          find third_party/llama.cpp/build-android -type f -name 'lib*.so' -print
 
-          cp third_party/llama.cpp/build-android/bin/libggml.so \
-            native/android-libs/
+          echo "=== COPIE DES LIBRAIRIES ==="
+          find third_party/llama.cpp/build-android -type f -name 'lib*.so' -exec cp {} native/android-libs/ \;
 
-          cp third_party/llama.cpp/build-android/bin/libggml-base.so \
-            native/android-libs/
-
-          cp third_party/llama.cpp/build-android/bin/libggml-cpu.so \
-            native/android-libs/
+          echo "=== LIBRAIRIES ANDROID ==="
+          ls -lh native/android-libs/
 
       - name: Compiler le wrapper Julia Qwen
         run: |
