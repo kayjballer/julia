@@ -79,6 +79,7 @@ jobs:
             -shared \
             -fPIC \
             -Ithird_party/llama.cpp/include \
+            -Ithird_party/llama.cpp/ggml/include \
             -Lthird_party/llama.cpp/build-android/bin \
             -Wl,-rpath,'$ORIGIN' \
             -o native/android-libs/libjulia_qwen.so \
