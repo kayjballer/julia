@@ -28,34 +28,103 @@ QWEN_MODEL_LOCK = threading.Lock()
 def ensure_qwen_model():
     model_dir = os.path.join(DATA, "models")
     model_path = os.path.join(model_dir, QWEN_MODEL_NAME)
-    source_path = "/storage/emulated/0/Download/" + QWEN_MODEL_NAME
 
     os.makedirs(model_dir, exist_ok=True)
 
     if os.path.isfile(model_path):
         return model_path
 
-    if not os.path.isfile(source_path):
-        raise RuntimeError(
-            "Modèle Qwen introuvable dans Download: " + source_path
-        )
-
-    print("Julia: copie du modèle Qwen depuis Download...")
+    print("Julia: sélection du modèle Qwen...")
 
     try:
-        shutil.copyfile(source_path, model_path)
+        from jnius import autoclass
+        from android.runnable import run_on_ui_thread
+
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        Intent = autoclass("android.content.Intent")
+        Activity = autoclass("android.app.Activity")
+
+        activity = PythonActivity.mActivity
+        request_code = 4242
+
+        result = {"uri": None}
+        finished = threading.Event()
+
+        def on_result(activity_obj, request_code_received, result_code, intent):
+            if request_code_received != request_code:
+                return
+
+            try:
+                if result_code == Activity.RESULT_OK and intent is not None:
+                    result["uri"] = intent.getData()
+            except Exception as exc:
+                print("Julia: erreur sélection Qwen:", repr(exc))
+            finally:
+                finished.set()
+
+        activity.bind(on_activity_result=on_result)
+
+        intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        intent.addCategory(Intent.CATEGORY_OPENABLE)
+        intent.setType("*/*")
+
+        @run_on_ui_thread
+        def launch_picker():
+            activity.startActivityForResult(intent, request_code)
+
+        launch_picker()
+
+        if not finished.wait(300):
+            try:
+                activity.unbind(on_activity_result=on_result)
+            except Exception:
+                pass
+            raise RuntimeError("Sélection du modèle Qwen expirée")
+
+        try:
+            activity.unbind(on_activity_result=on_result)
+        except Exception:
+            pass
+
+        uri = result["uri"]
+
+        if uri is None:
+            raise RuntimeError("Aucun modèle Qwen sélectionné")
+
+        resolver = activity.getContentResolver()
+        pfd = resolver.openFileDescriptor(uri, "r")
+
+        if pfd is None:
+            raise RuntimeError("Impossible d'ouvrir le modèle sélectionné")
+
+        fd = pfd.detachFd()
+        pfd.close()
+
+        print("Julia: copie du modèle Qwen dans son espace privé...")
+
+        with os.fdopen(fd, "rb") as src, open(model_path, "wb") as dst:
+            while True:
+                chunk = src.read(1024 * 1024)
+                if not chunk:
+                    break
+                dst.write(chunk)
+
     except Exception as exc:
+        try:
+            if os.path.isfile(model_path):
+                os.remove(model_path)
+        except Exception:
+            pass
+
         raise RuntimeError(
-            "Copie du modèle Qwen impossible: %s" % exc
+            "Import du modèle Qwen impossible: %s" % exc
         )
 
     if not os.path.isfile(model_path):
-        raise RuntimeError("La copie du modèle Qwen a échoué")
+        raise RuntimeError("Le modèle Qwen n'a pas été copié")
 
     print("Julia: modèle Qwen prêt.")
-
     return model_path
-
 
 def init_qwen_native():
     global QWEN_LIB, QWEN_READY, QWEN_ERROR
@@ -549,8 +618,6 @@ def pick(text, pref):
 
 
 def stream_brain(model, messages, on_text, text):
-    if not QWEN_READY or QWEN_LIB is None:
-        raise RuntimeError("Qwen natif indisponible: " + QWEN_ERROR)
 
     system = messages[0]['content'] if messages and messages[0].get('role') == 'system' else ''
     history = messages[1:-1] if messages else []
@@ -569,6 +636,9 @@ def stream_brain(model, messages, on_text, text):
     prompt = "\n".join(parts)
 
     model_path = ensure_qwen_model()
+
+    if not QWEN_READY or QWEN_LIB is None:
+        raise RuntimeError("Qwen natif indisponible: " + QWEN_ERROR)
 
     out = ctypes.create_string_buffer(32768)
 
