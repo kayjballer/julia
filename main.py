@@ -627,7 +627,7 @@ def pick(text, pref):
 
 def stream_brain(model, messages, on_text, text):
     if not QWEN_READY or QWEN_LIB is None:
-        raise RuntimeError("Qwen natif indisponible")
+        raise RuntimeError("Qwen natif indisponible: " + QWEN_ERROR)
 
     system = messages[0]['content'] if messages and messages[0].get('role') == 'system' else ''
     history = messages[1:-1] if messages else []
