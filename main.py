@@ -11,6 +11,7 @@ CODER = 'http://127.0.0.1:8081'
 NOBRAIN = "Mon cerveau n'est pas encore disponible."
 QWEN_LIB = None
 QWEN_READY = False
+QWEN_ERROR = ""
 
 
 QWEN_MODEL_NAME = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
@@ -137,9 +138,10 @@ def ensure_qwen_model():
         return model_path
 
 def init_qwen_native():
-    global QWEN_LIB, QWEN_READY
+    global QWEN_LIB, QWEN_READY, QWEN_ERROR
     QWEN_LIB = None
     QWEN_READY = False
+    QWEN_ERROR = ""
 
     try:
         from jnius import autoclass
@@ -186,7 +188,8 @@ def init_qwen_native():
     except Exception as exc:
         QWEN_LIB = None
         QWEN_READY = False
-        print("Julia: erreur chargement Qwen natif:", repr(exc))
+        QWEN_ERROR = repr(exc)
+        print("Julia: erreur chargement Qwen natif:", QWEN_ERROR)
 
 def make_ctx():
     ctx = ssl.create_default_context()
