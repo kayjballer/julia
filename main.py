@@ -138,35 +138,55 @@ def ensure_qwen_model():
 
 def init_qwen_native():
     global QWEN_LIB, QWEN_READY
+    QWEN_LIB = None
+    QWEN_READY = False
+
     try:
-        QWEN_LIB = ctypes.CDLL("libjulia_qwen.so")
+        from jnius import autoclass
+
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        activity = PythonActivity.mActivity
+        native_dir = activity.getApplicationInfo().nativeLibraryDir
+
+        libs = [
+            "libggml-base.so",
+            "libggml-cpu.so",
+            "libggml.so",
+            "libllama.so",
+            "libjulia_qwen.so",
+        ]
+
+        loaded = {}
+
+        for name in libs:
+            path = os.path.join(native_dir, name)
+
+            if not os.path.isfile(path):
+                raise RuntimeError("Bibliothèque absente: " + path)
+
+            loaded[name] = ctypes.CDLL(
+                path,
+                mode=ctypes.RTLD_GLOBAL,
+            )
+
+        QWEN_LIB = loaded["libjulia_qwen.so"]
+
         QWEN_LIB.julia_qwen_generate.argtypes = [
             ctypes.c_char_p,
             ctypes.c_char_p,
             ctypes.c_char_p,
             ctypes.c_int,
         ]
+
         QWEN_LIB.julia_qwen_generate.restype = ctypes.c_int
         QWEN_READY = True
-    except Exception:
+
+        print("Julia: moteur Qwen natif chargé depuis " + native_dir)
+
+    except Exception as exc:
         QWEN_LIB = None
         QWEN_READY = False
-ST = {'active': False, 't0': 0.0, 'err': None}
-GEN = {'id': 0, 'text': '', 'done': True, 'brain': True, 'stage': '', 'model': 'general', 'truncated': False,
-       'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None}
-LASTWEB = {'ts': 0, 'ctx': '', 'sources': []}
-VOUS = re.compile(r"\b(vous|votre|vos)\b", re.I)
-CODE_RE = re.compile(r"\b(code|coder|coding|python|javascript|java|html|css|bash|shell|termux|linux|script|fonction|"
-                     r"variable|boucle|bug|compile|programme|programmer|programmation|api|sql|json|regex|git|github|"
-                     r"algorithme|debug|déboguer)\b", re.I)
-LONG_RE = re.compile(r"(raconte|explique|détaill|développe|histoire|résume|décris|comment fonctionne|pourquoi|"
-                     r"continue|la suite|plus de détails|en détail)", re.I)
-ENCYC = re.compile(r"(c'est qui|qui est|qui était|qui sont|qu'est-ce que|qu'est ce que|c'est quoi|parle-moi de|parle moi de)", re.I)
-FRESH = re.compile(r"\b(aujourd'hui|actualités?|dernier|derniers|dernière|récent|maintenant|en ce moment|météo|score|"
-                   r"résultats?|prix|cours|combien coûte|président|premier ministre|sortie|news)\b", re.I)
-QWORD = re.compile(r"^\s*(qui|quel|quelle|quels|quelles|quand|où|combien|en quelle année|de quand)\b", re.I)
-DATEQ = re.compile(r"\b(aujourd'hui|demain|hier|ce soir|ce matin|cette semaine|ce mois|cette année|maintenant|actuel|en ce moment|dans \d+)", re.I)
-EXPL = re.compile(r"\b(cherche|recherche|google|sur internet|sur le web|vérifie)\b", re.I)
+        print("Julia: erreur chargement Qwen natif:", repr(exc))
 
 def make_ctx():
     ctx = ssl.create_default_context()
