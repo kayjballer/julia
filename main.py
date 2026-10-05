@@ -1,5 +1,5 @@
 import os, json, threading, time, re, sqlite3, ssl, html, math, unicodedata, datetime, concurrent.futures
-import urllib.request, urllib.parse, ctypes
+import urllib.request, urllib.parse, ctypes, hashlib
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -11,6 +11,130 @@ CODER = 'http://127.0.0.1:8081'
 NOBRAIN = "Mon cerveau n'est pas encore disponible."
 QWEN_LIB = None
 QWEN_READY = False
+
+
+QWEN_MODEL_NAME = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+QWEN_MODEL_URL = (
+    "https://huggingface.co/DhruvalLabs/"
+    "Qwen3-4B-Instruct-2507-GGUF/resolve/main/"
+    "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+)
+QWEN_MODEL_SHA256 = (
+    "1571ec5115bcfed4b4327fc27b5f44ea284806caf5331eef89326191c9b031d6"
+)
+QWEN_MODEL_LOCK = threading.Lock()
+
+def ensure_qwen_model():
+    model_dir = os.path.join(DATA, "models")
+    model_path = os.path.join(model_dir, QWEN_MODEL_NAME)
+    part_path = model_path + ".part"
+
+    os.makedirs(model_dir, exist_ok=True)
+
+    if os.path.isfile(model_path):
+        return model_path
+
+    with QWEN_MODEL_LOCK:
+        if os.path.isfile(model_path):
+            return model_path
+
+        print("Julia: téléchargement du modèle Qwen...")
+
+        downloaded = os.path.getsize(part_path) if os.path.isfile(part_path) else 0
+
+        headers = {
+            "User-Agent": "Julia-Android/1.0",
+            "Accept": "*/*",
+        }
+
+        if downloaded > 0:
+            headers["Range"] = "bytes=%d-" % downloaded
+
+        req = urllib.request.Request(
+            QWEN_MODEL_URL,
+            headers=headers,
+            method="GET",
+        )
+
+        try:
+            response = urllib.request.urlopen(req, timeout=30)
+        except Exception as exc:
+            raise RuntimeError(
+                "Téléchargement Qwen impossible: %s" % exc
+            )
+
+        status = getattr(response, "status", 200)
+
+        if downloaded > 0 and status == 206:
+            mode = "ab"
+            total = downloaded
+            content_range = response.headers.get("Content-Range", "")
+            try:
+                total_size = int(content_range.split("/")[-1])
+            except Exception:
+                total_size = 0
+        else:
+            mode = "wb"
+            downloaded = 0
+            total = 0
+            try:
+                total_size = int(response.headers.get("Content-Length", "0"))
+            except Exception:
+                total_size = 0
+
+        last_report = -1
+
+        with open(part_path, mode) as f:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+
+                f.write(chunk)
+                total += len(chunk)
+
+                mb = total // (1024 * 1024)
+                if mb >= last_report + 100:
+                    last_report = mb
+                    if total_size:
+                        pct = (100.0 * total) / total_size
+                        print(
+                            "Julia: Qwen %.1f%% (%d MB)"
+                            % (pct, mb)
+                        )
+                    else:
+                        print("Julia: Qwen %d MB" % mb)
+
+        response.close()
+
+        print("Julia: vérification SHA-256...")
+
+        h = hashlib.sha256()
+
+        with open(part_path, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                h.update(chunk)
+
+        digest = h.hexdigest()
+
+        if digest != QWEN_MODEL_SHA256:
+            try:
+                os.remove(part_path)
+            except OSError:
+                pass
+
+            raise RuntimeError(
+                "SHA-256 Qwen invalide: %s" % digest
+            )
+
+        os.replace(part_path, model_path)
+
+        print("Julia: modèle Qwen prêt.")
+
+        return model_path
 
 def init_qwen_native():
     global QWEN_LIB, QWEN_READY
@@ -501,14 +625,7 @@ def stream_brain(model, messages, on_text, text):
     parts.append("user: " + question)
     prompt = "\n".join(parts)
 
-    model_path = os.path.join(
-        DATA,
-        "models",
-        "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
-    )
-
-    if not os.path.isfile(model_path):
-        raise RuntimeError("Modèle Qwen absent")
+    model_path = ensure_qwen_model()
 
     out = ctypes.create_string_buffer(32768)
 
