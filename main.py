@@ -1,5 +1,5 @@
 import os, json, threading, time, re, sqlite3, ssl, html, math, unicodedata, datetime, concurrent.futures
-import urllib.request, urllib.parse, ctypes, hashlib
+import urllib.request, urllib.parse, ctypes, hashlib, shutil
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -28,114 +28,34 @@ QWEN_MODEL_LOCK = threading.Lock()
 def ensure_qwen_model():
     model_dir = os.path.join(DATA, "models")
     model_path = os.path.join(model_dir, QWEN_MODEL_NAME)
-    part_path = model_path + ".part"
+    source_path = "/storage/emulated/0/Download/" + QWEN_MODEL_NAME
 
     os.makedirs(model_dir, exist_ok=True)
 
     if os.path.isfile(model_path):
         return model_path
 
-    with QWEN_MODEL_LOCK:
-        if os.path.isfile(model_path):
-            return model_path
-
-        print("Julia: téléchargement du modèle Qwen...")
-
-        downloaded = os.path.getsize(part_path) if os.path.isfile(part_path) else 0
-
-        headers = {
-            "User-Agent": "Julia-Android/1.0",
-            "Accept": "*/*",
-        }
-
-        if downloaded > 0:
-            headers["Range"] = "bytes=%d-" % downloaded
-
-        req = urllib.request.Request(
-            QWEN_MODEL_URL,
-            headers=headers,
-            method="GET",
+    if not os.path.isfile(source_path):
+        raise RuntimeError(
+            "Modèle Qwen introuvable dans Download: " + source_path
         )
 
-        try:
-            response = urllib.request.urlopen(req, timeout=30)
-        except Exception as exc:
-            raise RuntimeError(
-                "Téléchargement Qwen impossible: %s" % exc
-            )
+    print("Julia: copie du modèle Qwen depuis Download...")
 
-        status = getattr(response, "status", 200)
+    try:
+        shutil.copyfile(source_path, model_path)
+    except Exception as exc:
+        raise RuntimeError(
+            "Copie du modèle Qwen impossible: %s" % exc
+        )
 
-        if downloaded > 0 and status == 206:
-            mode = "ab"
-            total = downloaded
-            content_range = response.headers.get("Content-Range", "")
-            try:
-                total_size = int(content_range.split("/")[-1])
-            except Exception:
-                total_size = 0
-        else:
-            mode = "wb"
-            downloaded = 0
-            total = 0
-            try:
-                total_size = int(response.headers.get("Content-Length", "0"))
-            except Exception:
-                total_size = 0
+    if not os.path.isfile(model_path):
+        raise RuntimeError("La copie du modèle Qwen a échoué")
 
-        last_report = -1
+    print("Julia: modèle Qwen prêt.")
 
-        with open(part_path, mode) as f:
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
+    return model_path
 
-                f.write(chunk)
-                total += len(chunk)
-
-                mb = total // (1024 * 1024)
-                if mb >= last_report + 100:
-                    last_report = mb
-                    if total_size:
-                        pct = (100.0 * total) / total_size
-                        print(
-                            "Julia: Qwen %.1f%% (%d MB)"
-                            % (pct, mb)
-                        )
-                    else:
-                        print("Julia: Qwen %d MB" % mb)
-
-        response.close()
-
-        print("Julia: vérification SHA-256...")
-
-        h = hashlib.sha256()
-
-        with open(part_path, "rb") as f:
-            while True:
-                chunk = f.read(1024 * 1024)
-                if not chunk:
-                    break
-                h.update(chunk)
-
-        digest = h.hexdigest()
-
-        if digest != QWEN_MODEL_SHA256:
-            try:
-                os.remove(part_path)
-            except OSError:
-                pass
-
-            raise RuntimeError(
-                "SHA-256 Qwen invalide: %s" % digest
-            )
-
-        os.replace(part_path, model_path)
-
-        print("Julia: modèle Qwen prêt.")
-
-        return model_path
 
 def init_qwen_native():
     global QWEN_LIB, QWEN_READY, QWEN_ERROR
