@@ -38,19 +38,20 @@ def ensure_qwen_model():
 
     try:
         from jnius import autoclass
+        from android import activity as android_activity
         from android.runnable import run_on_ui_thread
 
         PythonActivity = autoclass("org.kivy.android.PythonActivity")
         Intent = autoclass("android.content.Intent")
         Activity = autoclass("android.app.Activity")
 
-        activity = PythonActivity.mActivity
+        current_activity = PythonActivity.mActivity
         request_code = 4242
 
         result = {"uri": None}
         finished = threading.Event()
 
-        def on_result(activity_obj, request_code_received, result_code, intent):
+        def on_activity_result(request_code_received, result_code, intent):
             if request_code_received != request_code:
                 return
 
@@ -60,42 +61,43 @@ def ensure_qwen_model():
             except Exception as exc:
                 print("Julia: erreur sélection Qwen:", repr(exc))
             finally:
+                android_activity.unbind(
+                    on_activity_result=on_activity_result
+                )
                 finished.set()
-
-        activity.bind(on_activity_result=on_result)
-
-        intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
-        intent.addCategory(Intent.CATEGORY_OPENABLE)
-        intent.setType("*/*")
 
         @run_on_ui_thread
         def launch_picker():
-            activity.startActivityForResult(intent, request_code)
+            android_activity.bind(
+                on_activity_result=on_activity_result
+            )
+
+            intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            intent.setType("*/*")
+
+            current_activity.startActivityForResult(
+                intent,
+                request_code
+            )
 
         launch_picker()
 
         if not finished.wait(300):
-            try:
-                activity.unbind(on_activity_result=on_result)
-            except Exception:
-                pass
             raise RuntimeError("Sélection du modèle Qwen expirée")
-
-        try:
-            activity.unbind(on_activity_result=on_result)
-        except Exception:
-            pass
 
         uri = result["uri"]
 
         if uri is None:
             raise RuntimeError("Aucun modèle Qwen sélectionné")
 
-        resolver = activity.getContentResolver()
+        resolver = current_activity.getContentResolver()
         pfd = resolver.openFileDescriptor(uri, "r")
 
         if pfd is None:
-            raise RuntimeError("Impossible d'ouvrir le modèle sélectionné")
+            raise RuntimeError(
+                "Impossible d'ouvrir le modèle sélectionné"
+            )
 
         fd = pfd.detachFd()
         pfd.close()
@@ -125,6 +127,7 @@ def ensure_qwen_model():
 
     print("Julia: modèle Qwen prêt.")
     return model_path
+
 
 def init_qwen_native():
     global QWEN_LIB, QWEN_READY, QWEN_ERROR
