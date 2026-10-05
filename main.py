@@ -1,5 +1,5 @@
 import os, json, threading, time, re, sqlite3, ssl, html, math, unicodedata, datetime, concurrent.futures
-import urllib.request, urllib.parse
+import urllib.request, urllib.parse, ctypes
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -8,7 +8,25 @@ DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
 DB = os.path.join(DATA, 'julia.db')
 GENERAL = 'http://127.0.0.1:8080'
 CODER = 'http://127.0.0.1:8081'
-NOBRAIN = "Mon cerveau n'est pas lancé. Ouvre Termux et lance julia_brain.sh."
+NOBRAIN = "Mon cerveau n'est pas encore disponible."
+QWEN_LIB = None
+QWEN_READY = False
+
+def init_qwen_native():
+    global QWEN_LIB, QWEN_READY
+    try:
+        QWEN_LIB = ctypes.CDLL("libjulia_qwen.so")
+        QWEN_LIB.julia_qwen_generate.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.c_int,
+        ]
+        QWEN_LIB.julia_qwen_generate.restype = ctypes.c_int
+        QWEN_READY = True
+    except Exception:
+        QWEN_LIB = None
+        QWEN_READY = False
 ST = {'active': False, 't0': 0.0, 'err': None}
 GEN = {'id': 0, 'text': '', 'done': True, 'brain': True, 'stage': '', 'model': 'general', 'truncated': False,
        'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None}
@@ -464,11 +482,51 @@ def pick(text, pref):
 
 
 def stream_brain(model, messages, on_text, text):
-    code = model == 'code'
-    n = 520 if code else (380 if LONG_RE.search(text) else 150)
-    body = json.dumps({'messages': messages, 'max_tokens': n, 'temperature': 0.2 if code else 0.5,
-                       'top_p': 0.9, 'repeat_penalty': 1.1, 'stream': True, 'cache_prompt': True}).encode()
-    url = (CODER if code else GENERAL) + '/v1/chat/completions'
+    if not QWEN_READY or QWEN_LIB is None:
+        raise RuntimeError("Qwen natif indisponible")
+
+    system = messages[0]['content'] if messages and messages[0].get('role') == 'system' else ''
+    history = messages[1:-1] if messages else []
+    question = messages[-1]['content'] if messages else text
+
+    parts = []
+    if system:
+        parts.append(system)
+
+    for m in history:
+        role = m.get('role', 'user')
+        content = m.get('content', '')
+        parts.append(role + ": " + content)
+
+    parts.append("user: " + question)
+    prompt = "\n".join(parts)
+
+    model_path = os.path.join(
+        DATA,
+        "models",
+        "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+    )
+
+    if not os.path.isfile(model_path):
+        raise RuntimeError("Modèle Qwen absent")
+
+    out = ctypes.create_string_buffer(32768)
+
+    rc = QWEN_LIB.julia_qwen_generate(
+        model_path.encode("utf-8"),
+        prompt.encode("utf-8"),
+        out,
+        len(out),
+    )
+
+    if rc != 0:
+        raise RuntimeError("Qwen natif erreur %d" % rc)
+
+    answer = out.value.decode("utf-8", "replace").strip()
+    if answer:
+        on_text(answer)
+
+    return "stop"
     req = urllib.request.Request(url, data=body, headers={'Content-Type': 'application/json'})
     finish = None
     with urllib.request.urlopen(req, timeout=120) as r:
@@ -845,6 +903,8 @@ def warmup():
 
 if ANDROID:
     _native_make()
+
+init_qwen_native()
 
 if not os.environ.get('JULIA_NOSERVER'):
     threading.Thread(target=warmup, daemon=True).start()
