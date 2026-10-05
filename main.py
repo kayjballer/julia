@@ -907,5 +907,4 @@ if ANDROID:
 init_qwen_native()
 
 if not os.environ.get('JULIA_NOSERVER'):
-    threading.Thread(target=warmup, daemon=True).start()
     ThreadingHTTPServer(('127.0.0.1', 5000), H).serve_forever()
