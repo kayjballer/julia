@@ -28,7 +28,7 @@ canvas#c{position:absolute;inset:0;width:100%;height:100%}
 <div class="br" style="left:10px;bottom:10px;border-width:0 0 1px 1px"></div><div class="br" style="right:10px;bottom:10px;border-width:0 1px 1px 0"></div>
 <div id="top"><div><div id="ttl" style="font-size:24px;font-weight:700;letter-spacing:.05em;color:#f5b21f">J.U.L.I.A</div><span id="chip" style="display:inline-block;margin-top:6px;font-size:12px;padding:3px 10px;border-radius:10px;border:0.5px solid #f0a830;color:#f0a830">En veille</span></div>
 <button id="gear" class="b" aria-label="Paramètres" style="position:absolute;right:20px;top:calc(env(safe-area-inset-top,0px) + 14px);padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
-<div class="side" style="left:20px">Modèle<br><span id="mdl">Auto</span><br>Mémoire<br><span id="cnt">0 souvenir</span></div>
+<div class="side" style="left:20px">Modèle<br><span id="mdl">Qwen3 4B</span><br>Mémoire<br><span id="cnt">0 souvenir</span></div>
 <div class="side" style="right:20px;text-align:right">Langue<br><span id="lg">Français</span></div>
 <div id="bot">
 <div style="text-align:center;min-height:78px;max-height:26vh;overflow-y:auto;margin-bottom:6px">
@@ -48,7 +48,7 @@ canvas#c{position:absolute;inset:0;width:100%;height:100%}
 <div class="rw"><span>Ton de la voix</span><span data-seg="pitch"><button class="b" data-v="grave">Grave</button> <button class="b" data-v="normal">Normal</button> <button class="b" data-v="aigu">Aigu</button></span></div>
 <div class="rw"><span>Voix</span><button id="vbtn" class="b">Système</button></div>
 <div class="rw"><span>Langue</span><span data-seg="lang"><button class="b" data-v="FR">FR</button> <button class="b" data-v="EN">EN</button> <button class="b" data-v="WO">WO</button></span></div>
-<div class="rw"><span>Modèle IA</span><span data-seg="model"><button class="b" data-v="auto">Auto</button> <button class="b" data-v="general">Général</button> <button class="b" data-v="code">Code</button></span></div>
+<div class="rw"><span>Modèle IA</span><span>Qwen3 4B (local)</span></div>
 <div class="rw"><span>Accès à Internet</span><div class="tg" data-k="web"><i></i></div></div>
 <div class="rw"><span>Afficher les temps de réponse</span><div class="tg" data-k="dbg"><i></i></div></div>
 <div class="rw"><span>Sensibilité du micro</span><span data-seg="mic"><button class="b" data-v="bas">Bas</button> <button class="b" data-v="moyen">Moyen</button> <button class="b" data-v="haut">Haut</button></span></div>
@@ -63,7 +63,7 @@ function rs(){W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;ctx.setT
 rs();addEventListener('resize',rs);
 var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'auto',web:1,dbg:0,mic:'moyen',hue:42,pitch:'normal',vname:''};
 try{Object.assign(cfg,JSON.parse(localStorage.getItem('julia_cfg2')||'{}'))}catch(e){}
-if(['auto','general','code'].indexOf(cfg.model)<0)cfg.model='auto';
+cfg.model='general';
 function save(){try{localStorage.setItem('julia_cfg2',JSON.stringify(cfg))}catch(e){}}
 var LG={FR:'Français',EN:'English',WO:'Wolof'},MD={auto:'Auto',general:'Général',code:'Code'};
 var spoken=0,vlist=[];
@@ -77,7 +77,7 @@ document.querySelectorAll('.tg').forEach(function(e){e.classList.toggle('on',!!c
 document.querySelectorAll('[data-seg]').forEach(function(g){g.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',cfg[g.dataset.seg]===b.dataset.v)})});
 var vb=document.getElementById('vbtn'),vs=vlist,vi=0;for(var k=0;k<vs.length;k++)if(vs[k].name===cfg.vname)vi=k;
 if(vb)vb.textContent=vs.length?('Voix '+(vi+1)+'/'+vs.length):'Système';
-document.getElementById('lg').textContent=LG[cfg.lang];document.getElementById('mdl').textContent=MD[cfg.model];
+document.getElementById('lg').textContent=LG[cfg.lang];document.getElementById('mdl').textContent='Qwen3 4B';
 document.querySelectorAll('#sw b').forEach(function(s){s.style.borderColor=+s.dataset.h===cfg.hue?'#fff':'transparent'})}
 [[42,'55%'],[200,'55%'],[150,'50%'],[320,'60%']].forEach(function(c){var s=document.createElement('b');s.dataset.h=c[0];s.style.cssText='width:26px;height:26px;border-radius:50%;background:hsl('+c[0]+',85%,'+c[1]+');border:2px solid transparent;cursor:pointer';s.onclick=function(){cfg.hue=c[0];save();paint()};document.getElementById('sw').appendChild(s)});
 document.querySelectorAll('.tg').forEach(function(e){e.onclick=function(){cfg[e.dataset.k]=cfg[e.dataset.k]?0:1;save();paint()}});
@@ -113,7 +113,7 @@ fetch('/api/ask',{method:'POST',body:JSON.stringify({text:text,lang:cfg.lang,voi
 function speakable(t){return t.replace(/```[\s\S]*?(```|$)/g,' (le code est à l\'écran) ')}
 function genPoll(n,started){
 fetch('/api/gen').then(function(r){return r.json()}).then(function(g){
-if(g.model)document.getElementById('mdl').textContent=g.model==='code'?'Code':'Général';
+
 if(g.stage==='search'&&!started)jj.textContent='Julia cherche sur Internet…';
 if(g.text&&!started){setState('speak');started=true}
 if(started){var ex='';if(g.done){if(g.web_status==='ok'&&g.sources&&g.sources.length)ex+='\n— '+g.sources.slice(0,2).join(' · ');else if(g.web_status==='stale')ex+='\n(information enregistrée, non vérifiée)';else if(g.web_status==='fail'&&g.web_error)ex+='\n(Internet indisponible : '+g.web_error+')';else if(g.web_status==='empty')ex+='\n(rien de fiable trouvé sur Internet)'}
