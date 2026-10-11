@@ -35,11 +35,23 @@ jobs:
         pip install --upgrade pip
         pip install buildozer "cython<3.0"
 
+    - name: Restaurer la cle de signature
+      env:
+        KS: ${{ secrets.KEYSTORE_B64 }}
+      run: |
+        test -n "$KS"
+        mkdir -p ~/.android
+        echo "$KS" | base64 -d > ~/.android/debug.keystore
+        keytool -list -keystore ~/.android/debug.keystore -storepass android | head -3
+
     - name: Construire l'APK
       run: |
         set -o pipefail
         buildozer android debug 2>&1 | tee /tmp/build.log | tail -200
         exit ${PIPESTATUS[0]}
+
+    - name: Empreinte de signature
+      run: keytool -printcert -jarfile bin/*.apk | grep SHA256
 
     - name: Upload APK
       if: success()
