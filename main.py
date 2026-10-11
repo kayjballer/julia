@@ -8,7 +8,7 @@ DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
 DB = os.path.join(DATA, 'julia.db')
 GENERAL = 'http://127.0.0.1:8080'
 CODER = 'http://127.0.0.1:8081'
-NOBRAIN = "Mon cerveau n'est pas lancé. Ouvre Termux et lance julia_brain.sh."
+NOBRAIN = "Mon cerveau démarre, patiente quelques secondes."
 ST = {'active': False, 't0': 0.0, 'err': None}
 GEN = {'id': 0, 'text': '', 'done': True, 'brain': True, 'stage': '', 'model': 'general', 'truncated': False,
        'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None}
