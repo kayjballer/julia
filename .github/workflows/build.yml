@@ -51,7 +51,11 @@ jobs:
         exit ${PIPESTATUS[0]}
 
     - name: Empreinte de signature
-      run: keytool -printcert -jarfile bin/*.apk | grep SHA256
+      continue-on-error: true
+      run: |
+        AS=$(find ~/.buildozer -name apksigner -type f | head -1)
+        echo "apksigner: $AS"
+        "$AS" verify --print-certs bin/*.apk | grep -i "SHA-256" || true
 
     - name: Upload APK
       if: success()
