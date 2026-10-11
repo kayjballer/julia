@@ -1,4 +1,13 @@
-import os, time, subprocess, urllib.request
+import os, time, subprocess, ssl, urllib.request
+
+
+def ctx():
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception as e:
+        log('certifi: ' + repr(e))
+        return ssl.create_default_context()
 
 URL = 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf'
 SIZE = 1117320736
@@ -53,7 +62,7 @@ def get_model():
             break
         try:
             req = urllib.request.Request(URL, headers={'Range': 'bytes=%d-' % have})
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with urllib.request.urlopen(req, timeout=30, context=ctx()) as r:
                 mode = 'ab'
                 if have and r.status != 206:
                     mode, have = 'wb', 0

@@ -226,7 +226,7 @@ var bar=document.getElementById("brainbar"),msg=document.getElementById("brainms
 function tick(){
 fetch("/api/brain").then(function(r){return r.json()}).then(function(d){
 var st=d.stage||"";
-if(st==="download"){bar.style.display="block";msg.textContent="T\u00e9l\u00e9chargement du cerveau : "+(d.pct||0)+" %";fill.style.width=(d.pct||0)+"%";}
+if(st==="download"){bar.style.display="block";msg.textContent="T\u00e9l\u00e9chargement du cerveau : "+(d.pct||0)+" %"+(d.err?" | "+d.err:"");fill.style.width=(d.pct||0)+"%";}
 else if(st==="start"){bar.style.display="block";msg.textContent="D\u00e9marrage du cerveau...";fill.style.width="100%";}
 else if(st==="error"){bar.style.display="block";msg.textContent="Erreur cerveau : "+(d.err||"?");fill.style.width="0%";}
 else if(st==="ready"){if(!done){done=1;bar.style.display="block";msg.textContent="Cerveau pr\u00eat";fill.style.width="100%";setTimeout(function(){bar.style.display="none"},2500);}}
