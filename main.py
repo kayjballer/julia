@@ -416,8 +416,8 @@ def build_messages(text, lang, mem, web, note, code, dt):
             sql('INSERT OR IGNORE INTO facts(ts,text) VALUES(?,?)', (time.time(), f))
         facts = [r['text'] for r in sql('SELECT text FROM facts ORDER BY id DESC LIMIT 12', fetch=True)]
         nu = sql("SELECT COUNT(*) AS n FROM conv WHERE role='user'", fetch=True)[0]['n']
-        start = 0 if nu <= 8 else ((nu - 4) // 4) * 4
-        rows = sql('SELECT role,text FROM conv ORDER BY id LIMIT 16 OFFSET ?', (start * 2,), fetch=True)
+        start = 0 if nu <= 4 else ((nu - 2) // 2) * 2
+        rows = sql('SELECT role,text FROM conv ORDER BY id LIMIT 8 OFFSET ?', (start * 2,), fetch=True)
         pairs, i = [], 0
         while i + 1 < len(rows):
             if rows[i]['role'] == 'user' and rows[i + 1]['role'] == 'assistant':
@@ -427,7 +427,7 @@ def build_messages(text, lang, mem, web, note, code, dt):
                 i += 1
         for u, a in pairs:
             if lang == 'EN' or not VOUS.search(a):
-                hist += [{'role': 'user', 'content': u}, {'role': 'assistant', 'content': a}]
+                hist += [{'role': 'user', 'content': u}, {'role': 'assistant', 'content': a[:200]}]
     shot = [] if code else (SHOT_EN if lang == 'EN' else SHOT_FR)
     return [{'role': 'system', 'content': system_prompt(lang, facts, code, dt)}] + shot + hist + \
            [{'role': 'user', 'content': user_content(text, lang, web, note, code, dt)}]
