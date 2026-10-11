@@ -13,6 +13,7 @@ android.permissions = INTERNET,RECORD_AUDIO
 android.api = 33
 android.minapi = 24
 android.archs = arm64-v8a
+android.add_libs_arm64_v8a = libs/arm64-v8a/*.so
 android.accept_sdk_license = True
 p4a.bootstrap = webview
 p4a.port = 5000

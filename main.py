@@ -847,5 +847,7 @@ if ANDROID:
     _native_make()
 
 if not os.environ.get('JULIA_NOSERVER'):
+    import brain
+    threading.Thread(target=brain.ensure, daemon=True).start()
     threading.Thread(target=warmup, daemon=True).start()
     ThreadingHTTPServer(('127.0.0.1', 5000), H).serve_forever()
