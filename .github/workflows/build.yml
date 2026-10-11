@@ -50,12 +50,18 @@ jobs:
         buildozer android debug 2>&1 | tee /tmp/build.log | tail -200
         exit ${PIPESTATUS[0]}
 
-    - name: Empreinte de signature
-      continue-on-error: true
+    - name: Signer l'APK avec la cle stable
       run: |
         AS=$(find ~/.buildozer -name apksigner -type f | head -1)
         echo "apksigner: $AS"
-        "$AS" verify --print-certs bin/*.apk | grep -i "SHA-256" || true
+        for A in bin/*.apk; do
+          "$AS" sign --ks ~/.android/debug.keystore --ks-pass pass:android --key-pass pass:android --ks-key-alias androiddebugkey "$A"
+        done
+        APKFP=$("$AS" verify --print-certs bin/*.apk | grep -i "SHA-256 digest" | head -1 | sed "s/.*: //" | tr -d ": " | tr "A-F" "a-f")
+        KSFP=$(keytool -list -keystore ~/.android/debug.keystore -storepass android | grep -i "SHA-256" | head -1 | sed "s/.*: //" | tr -d ": " | tr "A-F" "a-f")
+        echo "APK: $APKFP"
+        echo "CLE: $KSFP"
+        test -n "$APKFP" && test "$APKFP" = "$KSFP"
 
     - name: Upload APK
       if: success()
