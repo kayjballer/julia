@@ -786,6 +786,12 @@ class H(SimpleHTTPRequestHandler):
             return self._json({'voices': native_voices(q.get('lang', ['FR'])[0]), 'native': NT['ready']})
         if u.path == '/api/memory':
             return self._json(memory_info())
+        if u.path == '/api/brain':
+            try:
+                import brain
+                return self._json(brain.ST)
+            except Exception as e:
+                return self._json({'stage': 'error', 'err': repr(e), 'pct': 0})
         if u.path == '/api/netcheck':
             return self._json(netcheck(q.get('q', ['zeus'])[0]))
         super().do_GET()

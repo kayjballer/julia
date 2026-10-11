@@ -219,4 +219,20 @@ var ww=wv.clientWidth;wx.clearRect(0,0,ww,36);wx.fillStyle=col;
 for(var i=0;i<36;i++){var hg=2+(state==='rest'&&extAmp===null?0:amp)*30*Math.abs(Math.sin(i*0.7+t*0.2)*Math.sin(i*0.31+t*0.13));wx.fillRect(i*(ww/36)+2,18-hg/2,Math.max(2,ww/36-5),hg)}
 requestAnimationFrame(frame)}
 frame();
-</script></body></html>
+</script><div id="brainbar" style="display:none;position:fixed;left:7%;right:7%;bottom:26%;z-index:9999;padding:12px 14px;border-radius:14px;background:rgba(10,10,14,.88);border:1px solid rgba(255,255,255,.25);color:#fff;font:15px sans-serif;text-align:center"><div id="brainmsg">...</div><div style="margin-top:8px;height:8px;border-radius:4px;background:rgba(255,255,255,.2);overflow:hidden"><div id="brainfill" style="height:100%;width:0%;background:#3da9ff;transition:width .6s"></div></div></div>
+<script>
+(function(){
+var bar=document.getElementById("brainbar"),msg=document.getElementById("brainmsg"),fill=document.getElementById("brainfill"),done=0;
+function tick(){
+fetch("/api/brain").then(function(r){return r.json()}).then(function(d){
+var st=d.stage||"";
+if(st==="download"){bar.style.display="block";msg.textContent="T\u00e9l\u00e9chargement du cerveau : "+(d.pct||0)+" %";fill.style.width=(d.pct||0)+"%";}
+else if(st==="start"){bar.style.display="block";msg.textContent="D\u00e9marrage du cerveau...";fill.style.width="100%";}
+else if(st==="error"){bar.style.display="block";msg.textContent="Erreur cerveau : "+(d.err||"?");fill.style.width="0%";}
+else if(st==="ready"){if(!done){done=1;bar.style.display="block";msg.textContent="Cerveau pr\u00eat";fill.style.width="100%";setTimeout(function(){bar.style.display="none"},2500);}}
+}).catch(function(){});
+}
+setInterval(tick,2000);tick();
+})();
+</script>
+</body></html>
