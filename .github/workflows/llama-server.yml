@@ -1,0 +1,38 @@
+name: Build llama-server Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ phase-a ]
+    paths: [ '.github/workflows/llama-server.yml' ]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Cloner llama.cpp
+        run: git clone --depth 1 https://github.com/ggml-org/llama.cpp
+
+      - name: Compiler (arm64, ARMv8 de base)
+        run: |
+          cd llama.cpp
+          cmake -B build \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-28 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_NATIVE=OFF \
+            -DGGML_CPU_ARM_ARCH=armv8-a \
+            -DGGML_OPENMP=OFF \
+            -DLLAMA_CURL=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build build --config Release -j4 --target llama-server llama-bench
+
+      - name: Upload binaires
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-android-arm64
+          path: |
+            llama.cpp/build/bin/llama-server
+            llama.cpp/build/bin/llama-bench
