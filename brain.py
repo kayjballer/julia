@@ -95,7 +95,7 @@ def ensure():
         m = get_model()
         ST['stage'] = 'start'
         out = open(LOG, 'ab')
-        subprocess.Popen([b, '-m', m, '-t', '6', '-c', '2048', '-np', '1', '-fa', 'on', '--chat-template-kwargs', '{"enable_thinking": false}',
+        subprocess.Popen([b, '-m', m, '-t', '6', '-c', '2048', '-np', '1', '-fa', 'on', '-lm', 'none', '--chat-template-kwargs', '{"enable_thinking": false}',
                           '--host', '127.0.0.1', '--port', str(PORT)],
                          stdout=out, stderr=subprocess.STDOUT)
         for _ in range(120):
