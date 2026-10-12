@@ -428,9 +428,10 @@ def build_messages(text, lang, mem, web, note, code, dt):
         for u, a in pairs:
             if lang == 'EN' or not VOUS.search(a):
                 hist += [{'role': 'user', 'content': u}, {'role': 'assistant', 'content': a[:200]}]
+    fnote = ("Ce que tu sais de l'utilisateur : " + " ; ".join(facts) + ".") if facts else ''
     shot = [] if code else (SHOT_EN if lang == 'EN' else SHOT_FR)
-    return [{'role': 'system', 'content': system_prompt(lang, facts, code, dt)}] + shot + hist + \
-           [{'role': 'user', 'content': user_content(text, lang, web, note, code, dt)}]
+    return [{'role': 'system', 'content': system_prompt(lang, [], code, dt)}] + shot + hist + \
+           [{'role': 'user', 'content': user_content(text, lang, web, ((note + '\n') if note else '') + fnote, code, dt)}]
 
 
 TUTOIE = [(r"\bpuis-je vous aider\b", "puis-je t'aider"), (r"\bvous aider\b", "t'aider"), (r"\bje vous\b", "je te"),
