@@ -10,7 +10,7 @@ html,body{margin:0;height:100%;background:#070403;color:#f3e3c3;font-family:syst
 :root{--c:hsl(var(--h) 90% 58%)}
 #ttl,#chip{color:var(--c)!important}#chip,#mic{border-color:var(--c)!important}
 #sky{position:absolute;inset:0;width:100%;height:100%}
-#orb{position:absolute;left:50%;top:36%;width:min(78vw,46vh);aspect-ratio:1;transform:translate(-50%,-50%);touch-action:manipulation}
+#orb{position:absolute;left:50%;top:36%;width:min(78vw,46vh);aspect-ratio:1;transform:translate(-50%,-50%);touch-action:none}
 #orb>*{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 #n1,#n2,#a1,#a2,.hl,.cr,.rp{will-change:transform}
 .hl{background:radial-gradient(circle,hsla(var(--h),90%,52%,.34),hsla(var(--h),90%,40%,.12) 38%,transparent 66%)}
@@ -26,6 +26,7 @@ html,body{margin:0;height:100%;background:#070403;color:#f3e3c3;font-family:syst
 .tg{width:40px;height:23px;border-radius:12px;background:rgba(255,255,255,.18);position:relative;cursor:pointer;flex:none}
 .tg i{position:absolute;top:3px;left:3px;width:17px;height:17px;border-radius:50%;background:#f3e3c3;transition:left .15s}
 .tg.on{background:#d98f1f}.tg.on i{left:20px}
+.gh{margin:18px 0 2px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#b39a70}
 .rw{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 0;border-bottom:0.5px solid rgba(255,200,110,.16);font-size:15px}
 .br{position:absolute;width:16px;height:16px;border:0 solid rgba(240,168,48,.55)}
 #top{position:absolute;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top,0px) + 16px) 20px 0;display:flex;justify-content:center;text-align:center}
@@ -45,6 +46,7 @@ html,body{margin:0;height:100%;background:#070403;color:#f3e3c3;font-family:syst
 <div class="br" style="left:10px;bottom:10px;border-width:0 0 1px 1px"></div><div class="br" style="right:10px;bottom:10px;border-width:0 1px 1px 0"></div>
 <div id="top"><div><div id="ttl" style="font-size:24px;font-weight:700;letter-spacing:.05em;color:#f5b21f">J.U.L.I.A</div><span id="chip" style="display:inline-block;margin-top:6px;font-size:12px;padding:3px 10px;border-radius:10px;border:0.5px solid #f0a830;color:#f0a830">En veille</span></div>
 <button id="gear" class="b" aria-label="Paramètres" style="position:absolute;right:20px;top:calc(env(safe-area-inset-top,0px) + 14px);padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
+<button id="hbtn" class="b" aria-label="Historique" style="position:absolute;left:20px;top:calc(env(safe-area-inset-top,0px) + 14px);padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
 <div class="side" style="left:20px">Modèle<br><i id="bd" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#888;margin-right:6px"></i><span id="mdl">Qwen3 1.7B</span><br>Mémoire<br><span id="cnt">0 souvenir</span></div>
 <div class="side" style="right:20px;text-align:right">Langue<br><span id="lg">Français</span></div>
 <div id="bot">
@@ -52,6 +54,7 @@ html,body{margin:0;height:100%;background:#070403;color:#f3e3c3;font-family:syst
 <p id="u" style="margin:0 0 6px;font-size:13px;color:#b39a70;line-height:1.5"></p>
 <p id="j" style="margin:0;font-size:16px;line-height:1.5"></p></div>
 <div id="kb" style="display:none;gap:8px;margin-bottom:10px"><input id="kin" type="text" enterkeyhint="send" autocomplete="off" placeholder="Écris à Julia…" style="flex:1;min-width:0;background:rgba(255,255,255,.06);color:#f3e3c3;border:0.5px solid rgba(255,200,110,.32);border-radius:10px;padding:10px 12px;font-size:16px;font-family:inherit;-webkit-user-select:text;user-select:text"><button id="ksend" class="b" aria-label="Envoyer" style="padding:0 14px">Envoyer</button></div>
+<div id="act" style="display:none;justify-content:center;gap:8px;margin-bottom:8px"><button id="act1" class="b">Réécouter</button><button id="act2" class="b">Copier</button><button id="act3" class="b">Partager</button></div>
 <div id="wv"></div>
 <div style="display:flex;justify-content:center;align-items:center;gap:30px">
 <button id="brain" class="b" aria-label="Mémoire" style="border-radius:50%;width:46px;height:46px;padding:0"><svg class="ic" viewBox="0 0 24 24"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V5a2 2 0 0 0-3-1zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1"/></svg></button>
@@ -60,21 +63,24 @@ html,body{margin:0;height:100%;background:#070403;color:#f3e3c3;font-family:syst
 <div id="mp" style="position:absolute;inset:0;z-index:2;background:rgba(7,4,3,.97);padding:calc(env(safe-area-inset-top,0px) + 16px) 20px 20px;overflow:auto;transform:translateX(-100%);transition:transform .25s"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:20px;font-weight:500">Mémoire</span><button id="mcl" class="b" aria-label="Fermer" style="padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div><div id="mlist"></div></div>
 <div id="pn">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:20px;font-weight:500">Paramètres</span><button id="cl" class="b" aria-label="Fermer" style="padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+<div class="gh">Voix</div>
 <div class="rw"><span>Voix de Julia</span><div class="tg" data-k="voice"><i></i></div></div>
-<div class="rw"><span>Vitesse de la voix</span><span data-seg="speed"><button class="b" data-v="lente">Lente</button> <button class="b" data-v="normale">Normale</button> <button class="b" data-v="rapide">Rapide</button></span></div>
-<div class="rw"><span>Ton de la voix</span><span data-seg="pitch"><button class="b" data-v="grave">Grave</button> <button class="b" data-v="normal">Normal</button> <button class="b" data-v="aigu">Aigu</button></span></div>
+<div class="rw"><span>Vitesse</span><span data-seg="speed"><button class="b" data-v="lente">Lente</button> <button class="b" data-v="normale">Normale</button> <button class="b" data-v="rapide">Rapide</button></span></div>
 <div class="rw"><span>Voix</span><button id="vbtn" class="b">Système</button></div>
+<div class="gh">Écoute</div>
 <div class="rw"><span>Langue</span><span data-seg="lang"><button class="b" data-v="FR">FR</button> <button class="b" data-v="EN">EN</button> <button class="b" data-v="WO">WO</button></span></div>
+<div class="rw"><span>Sensibilité du micro</span><span data-seg="mic"><button class="b" data-v="bas">Bas</button> <button class="b" data-v="moyen">Moyen</button> <button class="b" data-v="haut">Haut</button></span></div>
+<div class="gh">Affichage</div>
+<div class="rw"><span>Couleur de la sphère</span><span id="sw" style="display:flex;gap:12px"></span></div>
 <div class="rw"><span>Police simple</span><div class="tg" data-k="plain"><i></i></div></div>
 <div class="rw"><span>Taille du texte</span><span data-seg="fs"><button class="b" data-v="petite">Petite</button> <button class="b" data-v="normale">Normale</button> <button class="b" data-v="grande">Grande</button></span></div>
-<div class="rw"><span>Modèle IA</span><span>Qwen3 1.7B (local)</span></div>
+<div class="rw"><span>Temps de réponse</span><div class="tg" data-k="dbg"><i></i></div></div>
+<div class="gh">Cerveau</div>
 <div class="rw"><span>Accès à Internet</span><div class="tg" data-k="web"><i></i></div></div>
-<div class="rw"><span>Afficher les temps de réponse</span><div class="tg" data-k="dbg"><i></i></div></div>
-<div class="rw"><span>Sensibilité du micro</span><span data-seg="mic"><button class="b" data-v="bas">Bas</button> <button class="b" data-v="moyen">Moyen</button> <button class="b" data-v="haut">Haut</button></span></div>
 <div class="rw"><span>Mémoire automatique</span><div class="tg" data-k="mem"><i></i></div></div>
 <div class="rw"><span>Effacer la mémoire</span><button id="wipe" class="b" style="border-color:#e26a6a;color:#f0a0a0">Effacer</button></div>
-<div class="rw"><span>Couleur de la sphère</span><span id="sw" style="display:flex;gap:12px"></span></div>
 </div></div>
+<div id="hp" style="position:absolute;inset:0;z-index:2;background:rgba(7,4,3,.97);padding:calc(env(safe-area-inset-top,0px) + 16px) 20px 20px;display:flex;flex-direction:column;transform:translateY(100%);transition:transform .25s"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:20px;font-weight:500">Historique</span><span><button id="hclr" class="b">Effacer</button> <button id="hcl" class="b" aria-label="Fermer" style="padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span></div><div id="hlist" style="flex:1;overflow:auto"></div></div>
 <script>
 var dpr=window.devicePixelRatio||1;
 var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'auto',web:1,dbg:0,mic:'moyen',hue:42,pitch:'normal',vname:'',plain:0,fs:'normale'};
@@ -114,7 +120,7 @@ var T={rest:{o:0,c:'En veille'},listen:{o:8,c:'Écoute'},think:{o:-12,c:'Réflex
 var state='rest',cur=42,resp=0,px=null,py=null,t=0,ay=0,tc=0,extAmp=null,tmr=[],sx0=0,sy0=0;
 var chip=document.getElementById('chip'),mic=document.getElementById('mic'),uu=document.getElementById('u'),jj=document.getElementById('j');
 var ttl=document.getElementById('ttl');
-function setState(s){state=s;tc=0;chip.textContent=T[s].c;if(s==='speak')resp=1;if(window.applyState)applyState()}
+function setState(s){var pv=state;state=s;tc=0;if(s==='rest'&&pv==='speak')pushHist();chip.textContent=T[s].c;if(s==='speak')resp=1;if(window.applyState)applyState()}
 function typeInto(el,str){var k=0,id=setInterval(function(){k++;el.textContent=str.slice(0,k);if(k>=str.length)clearInterval(id)},28);tmr.push(id)}
 function clearTimers(){tmr.forEach(function(x){clearTimeout(x);clearInterval(x)});tmr=[]}
 function demo(){clearTimers();uu.textContent='';jj.textContent='';jj.style.color='#f3e3c3';setState('listen');typeInto(uu,'Quelle est la météo demain à Dakar ?');
@@ -224,7 +230,29 @@ mic.firstElementChild.innerHTML=state==='rest'?MIC:STOP;mic.setAttribute('aria-l
 applyHue();applyWave()}
 var sx0=0,sy0=0;
 orb.addEventListener('pointerdown',function(e){sx0=e.clientX;sy0=e.clientY});
-orb.addEventListener('pointerup',function(e){if(Math.hypot(e.clientX-sx0,e.clientY-sy0)<12)state==='rest'?startListen():stopAll()});
+orb.addEventListener('pointerup',function(e){var dx=e.clientX-sx0,dy=e.clientY-sy0;if(Math.hypot(dx,dy)<12)state==='rest'?startListen():stopAll();else if(dy<-70&&Math.abs(dx)<90)openHist()});
+var HIST=[],act=document.getElementById('act'),hp=document.getElementById('hp'),lp=0;
+try{HIST=JSON.parse(localStorage.getItem('julia_hist')||'[]')}catch(e){}
+function okEx(a,b){return a&&b&&!/^(Interrompu|Erreur|Julia )/.test(b)}
+function saveH(){try{localStorage.setItem('julia_hist',JSON.stringify(HIST))}catch(e){}}
+function pushHist(){var a=uu.textContent,b=jj.textContent,l=HIST[HIST.length-1];if(!okEx(a,b)||(l&&l.u===a&&l.j===b))return;HIST.push({u:a,j:b});HIST=HIST.slice(-40);saveH()}
+function sayForce(t){var v=cfg.voice;cfg.voice=1;say(t);cfg.voice=v}
+function copyTxt(t){try{navigator.clipboard.writeText(t)}catch(e){var a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();try{document.execCommand('copy')}catch(x){}a.remove()}}
+function drawHist(){var L=document.getElementById('hlist'),it=HIST.slice(),a=uu.textContent,b=jj.textContent,l=it[it.length-1];L.textContent='';
+if(okEx(a,b)&&!(l&&l.u===a&&l.j===b))it.push({u:a,j:b});
+if(!it.length){var e=document.createElement('p');e.style.color='#b39a70';e.textContent="Aucun échange pour l'instant.";L.appendChild(e)}
+it.forEach(function(x){var d=document.createElement('div'),q=document.createElement('p'),r=document.createElement('p');d.style.cssText='padding:12px 0;border-bottom:0.5px solid rgba(255,200,110,.16)';q.style.cssText='margin:0 0 4px;font-size:13px;color:#b39a70';q.textContent=x.u;r.style.cssText='margin:0;font-size:15px;line-height:1.5';r.textContent=x.j;r.onclick=function(){sayForce(x.j)};d.appendChild(q);d.appendChild(r);L.appendChild(d)});L.scrollTop=L.scrollHeight}
+function openHist(){drawHist();hp.style.transform='translateY(0)';document.getElementById('hlist').scrollTop=1e6}
+document.getElementById('hbtn').onclick=openHist;
+document.getElementById('hcl').onclick=function(){hp.style.transform='translateY(100%)'};
+document.getElementById('hclr').onclick=function(){HIST=[];try{localStorage.removeItem('julia_hist')}catch(e){}uu.textContent='';jj.textContent='';drawHist()};
+function hideAct(){act.style.display='none'}
+jj.addEventListener('pointerdown',function(){clearTimeout(lp);lp=setTimeout(function(){if(jj.textContent&&(state==='rest'||state==='speak'))act.style.display='flex'},550)});
+['pointerup','pointercancel'].forEach(function(n){jj.addEventListener(n,function(){clearTimeout(lp)})});
+document.getElementById('act1').onclick=function(){sayForce(jj.textContent);hideAct()};
+document.getElementById('act2').onclick=function(){var b=this;copyTxt(jj.textContent);b.textContent='Copié';setTimeout(function(){b.textContent='Copier';hideAct()},900)};
+document.getElementById('act3').onclick=function(){var t=jj.textContent;if(navigator.share)navigator.share({text:t}).catch(function(){});else copyTxt(t);hideAct()};
+document.addEventListener('pointerdown',function(e){if(act.style.display!=='none'&&!act.contains(e.target)&&e.target!==jj)hideAct()});
 setHue(cfg.hue);applyState();applyText();
 </script><div id="brainbar" style="display:none;position:fixed;left:7%;right:7%;bottom:26%;z-index:9999;padding:12px 14px;border-radius:14px;background:rgba(10,10,14,.88);border:1px solid rgba(255,255,255,.25);color:#fff;font:15px sans-serif;text-align:center"><div id="brainmsg">...</div><div style="margin-top:8px;height:8px;border-radius:4px;background:rgba(255,255,255,.2);overflow:hidden"><div id="brainfill" style="height:100%;width:0%;background:#3da9ff;transition:width .6s"></div></div></div>
 <script>
