@@ -68,7 +68,7 @@ html,body{margin:0;height:100%;background:#070403;color:#f3e3c3;font-family:syst
 <div class="rw"><span>Vitesse</span><span data-seg="speed"><button class="b" data-v="lente">Lente</button> <button class="b" data-v="normale">Normale</button> <button class="b" data-v="rapide">Rapide</button></span></div>
 <div class="rw"><span>Voix</span><button id="vbtn" class="b">Système</button></div>
 <div class="gh">Écoute</div>
-<div class="rw"><span>Langue</span><span data-seg="lang"><button class="b" data-v="FR">FR</button> <button class="b" data-v="EN">EN</button> <button class="b" data-v="WO">WO</button></span></div>
+<div class="rw"><span>Langue</span><span data-seg="lang"><button class="b" data-v="FR">FR</button> <button class="b" data-v="EN">EN</button> <button class="b" data-v="WO" disabled style="opacity:.4">WO bientôt</button></span></div>
 <div class="rw"><span>Sensibilité du micro</span><span data-seg="mic"><button class="b" data-v="bas">Bas</button> <button class="b" data-v="moyen">Moyen</button> <button class="b" data-v="haut">Haut</button></span></div>
 <div class="gh">Affichage</div>
 <div class="rw"><span>Couleur de la sphère</span><span id="sw" style="display:flex;gap:12px"></span></div>
@@ -85,7 +85,7 @@ html,body{margin:0;height:100%;background:#070403;color:#f3e3c3;font-family:syst
 var dpr=window.devicePixelRatio||1;
 var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'auto',web:1,dbg:0,mic:'moyen',hue:42,pitch:'normal',vname:'',plain:0,fs:'normale'};
 try{Object.assign(cfg,JSON.parse(localStorage.getItem('julia_cfg2')||'{}'))}catch(e){}
-cfg.model='general';
+cfg.model='general';if(cfg.lang==='WO')cfg.lang='FR';
 function save(){try{localStorage.setItem('julia_cfg2',JSON.stringify(cfg))}catch(e){}}
 var LG={FR:'Français',EN:'English',WO:'Wolof'},MD={auto:'Auto',general:'Général',code:'Code'};
 var spoken=0,vlist=[];
