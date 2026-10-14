@@ -19,7 +19,8 @@ CODE_RE = re.compile(r"\b(code|coder|coding|python|javascript|java|html|css|bash
                      r"algorithme|debug|déboguer)\b", re.I)
 LONG_RE = re.compile(r"(raconte|explique|détaill|développe|histoire|résume|décris|comment fonctionne|pourquoi|"
                      r"continue|la suite|plus de détails|en détail)", re.I)
-ENCYC = re.compile(r"(c'est qui|qui est|qui était|qui sont|qu'est-ce que|qu'est ce que|c'est quoi|parle-moi de|parle moi de)", re.I)
+ENCYC = re.compile(r"(c'est qui|qui est|qui était|qui sont|qu'est-ce que|qu'est ce que|c'est quoi|parle-moi de|parle moi de|définition|définis|signifie|veut dire|ça veut dire|explique-moi|explique moi|expliquer|explique)", re.I)
+DEF = re.compile(r"(définition|définis|signifie|veut dire|ça veut dire|le mot )", re.I)
 FRESH = re.compile(r"\b(aujourd'hui|actualités?|dernier|derniers|dernière|récent|maintenant|en ce moment|météo|score|"
                    r"résultats?|prix|cours|combien coûte|président|premier ministre|sortie|news)\b", re.I)
 QWORD = re.compile(r"^\s*(qui|quel|quelle|quels|quelles|quand|où|combien|en quelle année|de quand)\b", re.I)
@@ -236,6 +237,18 @@ def wiki_search(q):
     return []
 
 
+def wikt_search(q):
+    w = (q.strip().split(' ') or [q])[-1].lower()
+    d = json.loads(http_get('https://fr.wiktionary.org/api/rest_v1/page/definition/' + urllib.parse.quote(w)))
+    out = []
+    for e in (d.get('fr') or []):
+        defs = [tags(x.get('definition', '')) for x in e.get('definitions', [])][:3]
+        defs = [x for x in defs if x]
+        if defs:
+            out.append(['Wiktionnaire - %s (%s)' % (w, str(e.get('partOfSpeech', '')).lower()), ' ; '.join(defs)[:400]])
+    return out[:2]
+
+
 def ddg_search(q):
     page = http_get('https://html.duckduckgo.com/html/',
                     data=urllib.parse.urlencode({'q': q, 'kl': 'fr-fr'}).encode())
@@ -258,7 +271,7 @@ def bing_search(q):
 def entity(text):
     t = text.replace('’', "'")
     t = re.sub(r"(?i)(c'est qui|qui est|qui était|qui sont|qu'est-ce que|qu'est ce que|c'est quoi|parle-moi de|"
-               r"parle moi de|cherche|recherche|sur internet|sur le web|dis-moi)", ' ', t)
+               r"parle moi de|définition|définis|signifie|veut dire|ça veut dire|explique-moi|explique moi|expliquer|explique|du mot|le mot|cherche|recherche|sur internet|sur le web|dis-moi)", ' ', t)
     t = re.sub(r"[?!.,]", ' ', t)
     return re.sub(r'\s+', ' ', t).strip() or text
 
@@ -266,7 +279,7 @@ def entity(text):
 def web_mode(text, model):
     if EXPL.search(text) or FRESH.search(text):
         return 'fresh'
-    if ENCYC.search(text) or (QWORD.search(text) and model != 'code'):
+    if model != 'code' and (ENCYC.search(text) or QWORD.search(text)):
         return 'enc'
     return None
 
@@ -302,6 +315,14 @@ def rag(text, mode, year):
     maxage = 1800 if mode == 'fresh' else 7 * 86400
     hits = [h for h in bm25_rank(q, kb_docs(maxage)) if h[1] >= 0.5]
     err, status, all_failed = '', 'ok', False
+    if not hits and DEF.search(text):
+        try:
+            ch = wikt_search(q)
+        except Exception as e:
+            ch, err = [], err_short(e)
+        if ch:
+            sql('INSERT OR REPLACE INTO cache(query,ts,result) VALUES(?,?,?)', (q.lower(), time.time(), json.dumps(ch)))
+            hits = [h for h in bm25_rank(q, kb_docs(maxage)) if h[1] >= 0.5]
     if not hits:
         chunks, err, all_failed = live_search(q, mode, year)
         if chunks:
@@ -314,8 +335,8 @@ def rag(text, mode, year):
     if not hits:
         return {'ctx': '', 'sources': [], 'status': 'fail' if all_failed else 'empty', 'error': err, 'age': 0}
     best = hits[0][0]
-    top = [h for h in hits if h[0] >= 0.6 * best][:3]
-    ctx = '\n'.join('[%s] %s' % (h[2]['title'][:60], h[2]['text'][:420]) for h in top)[:1200]
+    top = [h for h in hits if h[0] >= 0.6 * best][:2]
+    ctx = '\n'.join('[%s] %s' % (h[2]['title'][:60], h[2]['text'][:320]) for h in top)[:700]
     srcs = []
     for h in top:
         if h[2]['title'] not in srcs:
@@ -429,7 +450,7 @@ def build_messages(text, lang, mem, web, note, code, dt):
             if lang == 'EN' or not VOUS.search(a):
                 hist += [{'role': 'user', 'content': u}, {'role': 'assistant', 'content': a[:200]}]
     fnote = ("Ce que tu sais de l'utilisateur : " + " ; ".join(facts) + ".") if facts else ''
-    shot = [] if code else (SHOT_EN if lang == 'EN' else SHOT_FR)
+    shot = []
     return [{'role': 'system', 'content': system_prompt(lang, [], code, dt)}] + shot + hist + \
            [{'role': 'user', 'content': user_content(text, lang, web, ((note + '\n') if note else '') + fnote, code, dt)}]
 
