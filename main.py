@@ -522,10 +522,160 @@ def finish_direct(gid, out, voice, lang, status='none', err=''):
     GEN['done'] = True
 
 
+# ---------- API gratuites : réponses directes, sans le modèle ----------
+CITY0 = ('Dakar', 14.6937, -17.4441)
+WMO = {0: 'ciel dégagé', 1: 'plutôt dégagé', 2: 'partiellement nuageux', 3: 'ciel couvert', 45: 'brouillard', 48: 'brouillard',
+       51: 'bruine légère', 53: 'bruine', 55: 'bruine forte', 61: 'pluie légère', 63: 'pluie', 65: 'forte pluie',
+       71: 'neige légère', 73: 'neige', 75: 'forte neige', 80: 'averses légères', 81: 'averses', 82: 'fortes averses',
+       95: 'orage', 96: 'orage et grêle', 99: 'orage et grêle'}
+METEO = re.compile(r"(météo|meteo|quel temps|va-t-il pleuvoir|il pleut|température|soleil.*(se couche|se lève|coucher|lever)|(se couche|se lève|coucher|lever).*soleil)", re.I)
+NOCITY = set("demain aujourd hui ce cette la le les l maintenant venir semaine soir matin midi après apres quel quelle cet moi toi mon ma".split())
+DEV = {'euro': 'EUR', 'eur': 'EUR', 'dollar': 'USD', 'usd': 'USD', 'livre sterling': 'GBP', 'livre': 'GBP', 'franc cfa': 'XOF',
+       'cfa': 'XOF', 'xof': 'XOF', 'dirham': 'MAD', 'naira': 'NGN', 'yen': 'JPY', 'yuan': 'CNY', 'franc suisse': 'CHF',
+       'rand': 'ZAR', 'cedi': 'GHS'}
+UNITS = {'EUR': ('euro', 'euros'), 'USD': ('dollar', 'dollars'), 'GBP': ('livre sterling', 'livres sterling'),
+         'XOF': ('franc CFA', 'francs CFA'), 'MAD': ('dirham', 'dirhams'), 'NGN': ('naira', 'nairas'), 'JPY': ('yen', 'yens'),
+         'CNY': ('yuan', 'yuans'), 'CHF': ('franc suisse', 'francs suisses'), 'ZAR': ('rand', 'rands'), 'GHS': ('cedi', 'cedis')}
+CRYPTO = {'bitcoin': 'bitcoin', 'btc': 'bitcoin', 'ethereum': 'ethereum', 'éthereum': 'ethereum', 'eth': 'ethereum',
+          'solana': 'solana', 'dogecoin': 'dogecoin'}
+
+
+def jget(url):
+    return json.loads(http_get(url))
+
+
+def nf(x, d=0):
+    i, _, f = ('%.*f' % (d, x)).partition('.')
+    neg = i.startswith('-')
+    i = '{:,}'.format(int(i.lstrip('-'))).replace(',', ' ')
+    return ('-' if neg else '') + i + (',' + f if f else '')
+
+
+def hm(x):
+    return '%dh%s' % (int(x[11:13]), x[14:16])
+
+
+def meteo_answer(text):
+    t = text.lower()
+    name, lat, lon = CITY0
+    done = False
+    for m in re.finditer(r"(?:à|au|en|pour|sur|dans|de)\s+(?=([a-zà-ÿ'’-]+(?:[ -][a-zà-ÿ'’-]+)?))", t):
+        w = m.group(1).strip(" -'’")
+        if len(w) < 3 or w.split(' ')[0] in NOCITY:
+            continue
+        for cand in dict.fromkeys([w, w.split(' ')[0]]):
+            try:
+                r = (jget('https://geocoding-api.open-meteo.com/v1/search?count=1&language=fr&name=' + urllib.parse.quote(cand)).get('results') or [None])[0]
+            except Exception:
+                r = None
+            if r:
+                name, lat, lon = r['name'], r['latitude'], r['longitude']
+                done = True
+                break
+        if done:
+            break
+    d = jget('https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s&current=temperature_2m,apparent_temperature,weather_code'
+             '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset'
+             '&timezone=auto&forecast_days=3' % (lat, lon))
+    c, dl = d['current'], d['daily']
+    i = 2 if re.search(r"apr[èe]s-demain", t) else 1 if 'demain' in t else 0
+    if 'soleil' in t:
+        return 'À %s, le soleil se lève à %s et se couche à %s.' % (name, hm(dl['sunrise'][i]), hm(dl['sunset'][i]))
+    day = "%s, entre %d et %d degrés, risque de pluie %d pour cent." % (
+        WMO.get(dl['weather_code'][i], 'temps variable'), round(dl['temperature_2m_min'][i]), round(dl['temperature_2m_max'][i]),
+        dl['precipitation_probability_max'][i] or 0)
+    if i == 0:
+        return "À %s, il fait %d degrés, %s, ressenti %d. Aujourd'hui, entre %s" % (
+            name, round(c['temperature_2m']), WMO.get(c['weather_code'], 'temps variable'), round(c['apparent_temperature']),
+            day.split(', entre ', 1)[1])
+    return "%s à %s : %s" % (('Demain', 'Après-demain')[i - 1], name, day)
+
+
+def unit(code, n):
+    return UNITS[code][0 if abs(n) < 2 else 1]
+
+
+def conv_answer(text):
+    t = re.sub(r"\b(euro|dollar|dirham|naira|yen|yuan|rand|cedi|livre)s\b", r"\1", re.sub(r"\bfrancs\b", "franc", text.lower()))
+    t = re.sub(r"(?<=\d) (?=\d{3}\b)", "", t)
+    cn = '|'.join(sorted(DEV, key=len, reverse=True))
+    m = re.search(r"(?:(\d+(?:[.,]\d+)?|une?)\s*)?\b(%s)\b\s*(?:en|vers|to|contre|pour)\s*\b(%s)\b" % (cn, cn), t)
+    if not m:
+        return None
+    amt = 1.0 if (not m.group(1) or m.group(1) in ('un', 'une')) else float(m.group(1).replace(',', '.'))
+    a, b = DEV[m.group(2)], DEV[m.group(3)]
+    if a == b:
+        return None
+    out = amt * jget('https://open.er-api.com/v6/latest/' + a)['rates'][b]
+    return "%s %s, c'est environ %s %s." % (nf(amt, 0 if amt == int(amt) else 2), unit(a, amt),
+                                            nf(out, 0 if (b in ('XOF', 'JPY') or out >= 100) else 2), unit(b, out))
+
+
+def crypto_answer(text):
+    t = text.lower()
+    m = re.search(r"\b(%s)\b" % '|'.join(CRYPTO), t)
+    if not m or not re.search(r"(prix|cours|vaut|valeur|combien)", t):
+        return None
+    cid = CRYPTO[m.group(1)]
+    d = jget('https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=usd,eur&include_24hr_change=true' % cid)[cid]
+    ch = d.get('usd_24h_change') or 0
+    return '%s : %s dollars, soit %s euros, %s %s pour cent en 24 heures.' % (
+        cid.capitalize(), nf(d['usd'], 0 if d['usd'] >= 100 else 2), nf(d['eur'], 0 if d['eur'] >= 100 else 2),
+        'plus' if ch >= 0 else 'moins', nf(abs(ch), 1))
+
+
+def news_answer(text):
+    t = text.lower()
+    if not re.search(r"\b(actualités?|actu|les infos|les nouvelles|gros titres|les titres)\b", t) or len(t.split()) > 8 or ' sur ' in t:
+        return None
+    import xml.etree.ElementTree as ET
+    sec = 'sports' if 'sport' in t else 'monde' if 'monde' in t else 'afrique'
+    root = ET.fromstring(http_get('https://www.rfi.fr/fr/%s/rss' % sec))
+    ts = [html.unescape((i.findtext('title') or '').strip())[:120] for i in root.iter('item')]
+    ts = [x for x in ts if x][:3]
+    return ('Voici les titres de RFI : ' + ' ; '.join('%d, %s' % (k + 1, x) for k, x in enumerate(ts)) + '.') if ts else None
+
+
+def nba_answer(text):
+    t = text.lower()
+    if 'nba' not in t or not re.search(r"(score|résultat|match|joué|gagné)", t):
+        return None
+    out = []
+    for e in jget('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard').get('events', [])[:5]:
+        cs = e['competitions'][0]['competitors']
+        st = e['status']['type']
+        a, b = cs[0], cs[1]
+        if st.get('completed'):
+            out.append('%s %s, %s %s' % (a['team']['shortDisplayName'], a.get('score', 0), b['team']['shortDisplayName'], b.get('score', 0)))
+        elif st.get('state') == 'in':
+            out.append('%s %s, %s %s en cours' % (a['team']['shortDisplayName'], a.get('score', 0), b['team']['shortDisplayName'], b.get('score', 0)))
+        else:
+            out.append('%s contre %s à venir' % (a['team']['shortDisplayName'], b['team']['shortDisplayName']))
+    return ('Matchs NBA : ' + ' ; '.join(out) + '.') if out else "Aucun match NBA n'est affiché aujourd'hui."
+
+
+def api_answer(text):
+    for fn, src, gate in ((meteo_answer, 'Open-Meteo', METEO.search(text)), (conv_answer, 'ExchangeRate-API', True),
+                          (crypto_answer, 'CoinGecko', True), (news_answer, 'RFI', True), (nba_answer, 'ESPN', True)):
+        if gate:
+            try:
+                a = fn(text)
+            except Exception:
+                a = None
+            if a:
+                return a, src
+    return None
+
+
 def generate(gid, text, lang, voice, mem, web, pref, dt):
     t0 = time.time()
     if lang != 'EN' and CLOCK.search(text):
         return finish_direct(gid, clock_answer(text, dt), voice, lang)
+    if lang != 'EN' and web:
+        r = api_answer(text)
+        if r:
+            GEN['sources'] = [r[1]]
+            return finish_direct(gid, r[0], voice, lang, 'ok')
     model = pick(text, pref)
     mode = web_mode(text, model) if web else None
     info = {'ctx': '', 'sources': [], 'status': 'none', 'error': '', 'age': 0}
