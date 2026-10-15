@@ -12,7 +12,7 @@ NOBRAIN = "Mon cerveau démarre, patiente quelques secondes."
 ST = {'active': False, 't0': 0.0, 'err': None}
 GEN = {'id': 0, 'text': '', 'done': True, 'brain': True, 'stage': '', 'model': 'general', 'truncated': False,
        'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None, 'web_q': '', 'web_ms': 0, 'web_n': 0}
-LASTWEB = {'ts': 0, 'ctx': '', 'sources': []}
+LASTWEB = {'ts': 0, 'ctx': '', 'sources': [], 'q': '', 'mode': None}
 VOUS = re.compile(r"\b(vous|votre|vos)\b", re.I)
 CODE_RE = re.compile(r"\b(code|coder|coding|python|javascript|java|html|css|bash|shell|termux|linux|script|fonction|"
                      r"variable|boucle|bug|compile|programme|programmer|programmation|api|sql|json|regex|git|github|"
@@ -87,6 +87,18 @@ PATTERNS = [
     (r"\bj'habite (?:à|a|en|au|aux) ([\w'\- ]{2,30})", "Il habite à {}"),
     (r"\bj'aime (?:bien |beaucoup )?(?:le |la |les |l')?([\w'\- ]{2,30})", "Il aime {}"),
     (r"\bje travaille (?:comme|en tant que) ([\w'\- ]{2,30})", "Il travaille comme {}"),
+]
+
+
+PATTERNS += [
+    (r"\bj'ai (\d{1,2}) ans\b", "Il a {} ans"),
+    (r"\bje parle (fran[cç]ais|anglais|wolof|espagnol|italien|arabe|portugais)", "Il parle {}"),
+    (r"\bje viens (?:de|du|d') ?([\w'\- ]{2,30})", "Il vient de {}"),
+    (r"\bje joue (?:au |à la |à l'|en |comme )?([\w'\- ]{2,30})", "Il joue {}"),
+    (r"\bmon (?:équipe|club) (?:préféré|préférée|favori|favorite) est (?:le |la |l')?([\w'\- ]{2,30})", "Son équipe préférée : {}"),
+    (r"\bje veux devenir ([\w'\- ]{3,40})", "Il veut devenir {}"),
+    (r"\bmon objectif (?:est|c'est) (?:de )?([\w'\- ]{3,50})", "Son objectif : {}"),
+    (r"\bje suis (?:un |une )?(étudiant|étudiante|lycéen|lycéenne|basketteur|basketteuse|entrepreneur|développeur|développeuse|footballeur)\b", "Il est {}"),
 ]
 
 
@@ -232,15 +244,28 @@ def wiki_exact(lang, q):
     return []
 
 
+def wiki_snips(lang, q):
+    d = json.loads(http_get('https://%s.wikipedia.org/w/api.php?action=query&format=json&list=search&srlimit=3&srprop=snippet&srsearch=%s'
+                            % (lang, urllib.parse.quote(q))))
+    return [['Wikipédia - ' + r['title'], tags(r.get('snippet', ''))] for r in (d.get('query') or {}).get('search', [])
+            if len(tags(r.get('snippet', ''))) > 30]
+
+
 def wiki_search(q):
     for lang in ('fr', 'en'):
+        res0 = []
         if len(q.split()) <= 4:
             try:
-                ex = wiki_exact(lang, q)
+                res0 = wiki_exact(lang, q)
             except Exception:
-                ex = []
-            if ex:
-                return ex
+                res0 = []
+        if len(toks(q)) >= 3:
+            try:
+                res0 += wiki_snips(lang, q)
+            except Exception:
+                pass
+        if res0:
+            return res0
         url = ('https://%s.wikipedia.org/w/api.php?action=query&format=json&generator=search&gsrlimit=2'
                '&prop=extracts&exintro=1&explaintext=1&exchars=1100&redirects=1&gsrsearch=%s'
                % (lang, urllib.parse.quote(q)))
@@ -328,9 +353,9 @@ def live_search(q, mode, year):
     return chunks[:8], ' ; '.join(errors)[:160], bool(errors) and not chunks and vides == 0
 
 
-def rag(text, mode, year):
+def rag(text, mode, year, subject=''):
     t0 = time.time()
-    q = entity(text)
+    q = ((subject + ' ') if subject else '') + entity(text)
     maxage = 1800 if mode == 'fresh' else 7 * 86400
     hits = [h for h in bm25_rank(q, kb_docs(maxage)) if h[1] >= 0.5]
     err, status, all_failed = '', 'ok', False
@@ -450,12 +475,26 @@ def user_content(text, lang, web, note, code, dt=None):
     return head + text + "\n" + tail + dl + (("\n" + note) if note else '')
 
 
+def pick_facts(text):
+    rows = [r['text'] for r in sql('SELECT text FROM facts ORDER BY id DESC LIMIT 100', fetch=True)]
+    core = [f for f in rows if re.match(r"Il (s'appelle|habite|parle|vient)", f)][:3]
+    if len(text.split()) < 3:
+        return core[:1]
+    rest = [f for f in rows if f not in core]
+    rel = [h[2]['text'] for h in bm25_rank(text, [{'title': '', 'text': f} for f in rest], k=3) if h[0] >= 0.2] if rest else []
+    out = []
+    for f in core + rel + rest[:2]:
+        if f not in out:
+            out.append(f)
+    return out[:6]
+
+
 def build_messages(text, lang, mem, web, note, code, dt):
     facts, hist = [], []
     if mem:
         for f in extract_facts(text):
             sql('INSERT OR IGNORE INTO facts(ts,text) VALUES(?,?)', (time.time(), f))
-        facts = [r['text'] for r in sql('SELECT text FROM facts ORDER BY id DESC LIMIT 12', fetch=True)]
+        facts = pick_facts(text)
         nu = sql("SELECT COUNT(*) AS n FROM conv WHERE role='user'", fetch=True)[0]['n']
         start = 0 if nu <= 4 else ((nu - 2) // 2) * 2
         rows = sql('SELECT role,text FROM conv ORDER BY id LIMIT 8 OFFSET ?', (start * 2,), fetch=True)
@@ -706,9 +745,18 @@ def generate(gid, text, lang, voice, mem, web, pref, dt):
         except Exception as e:
             info = {'ctx': '', 'sources': [], 'status': 'fail', 'error': err_short(e), 'age': 0}
         if info['ctx']:
-            LASTWEB.update(ts=time.time(), ctx=info['ctx'], sources=info['sources'])
+            LASTWEB.update(ts=time.time(), ctx=info['ctx'], sources=info['sources'], q=info.get('q', ''), mode=mode)
     elif web and FOLLOW.search(text) and LASTWEB['ctx'] and time.time() - LASTWEB['ts'] < 600:
         info = {'ctx': LASTWEB['ctx'], 'sources': LASTWEB['sources'], 'status': 'ok', 'error': '', 'age': 0}
+        if LASTWEB.get('q'):
+            GEN.update(stage='search', hold=(LASTWEB.get('mode') == 'fresh'))
+            try:
+                i2 = rag(text, LASTWEB.get('mode') or 'enc', dt.year, subject=LASTWEB['q'])
+                if i2['ctx']:
+                    info = i2
+                    LASTWEB.update(ts=time.time(), ctx=i2['ctx'], sources=i2['sources'])
+            except Exception:
+                pass
     if GEN['id'] != gid:
         return
     GEN.update(web_status=info['status'], web_error=info['error'], sources=info['sources'] if info['ctx'] else [],
