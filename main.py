@@ -11,7 +11,7 @@ CODER = 'http://127.0.0.1:8081'
 NOBRAIN = "Mon cerveau démarre, patiente quelques secondes."
 ST = {'active': False, 't0': 0.0, 'err': None}
 GEN = {'id': 0, 'text': '', 'done': True, 'brain': True, 'stage': '', 'model': 'general', 'truncated': False,
-       'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None}
+       'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None, 'web_q': '', 'web_ms': 0, 'web_n': 0}
 LASTWEB = {'ts': 0, 'ctx': '', 'sources': []}
 VOUS = re.compile(r"\b(vous|votre|vos)\b", re.I)
 CODE_RE = re.compile(r"\b(code|coder|coding|python|javascript|java|html|css|bash|shell|termux|linux|script|fonction|"
@@ -152,7 +152,8 @@ def toks(s):
     for w in re.findall(r"[a-z0-9]+", fold(s)):
         if w in STOP or len(w) < 2:
             continue
-        out.append(w[:-1] if len(w) > 3 and w[-1] in 'sx' else w)
+        w = w[:-1] if len(w) > 3 and w[-1] in 'sx' else w
+        out.append(w[:-1] if len(w) > 4 and w[-1] == 'e' else w)
     return out
 
 
@@ -172,7 +173,7 @@ def bm25_rank(query, docs, k=4):
     qt = set(toks(query))
     if not qt or not docs:
         return []
-    dts = [toks(d['title'] + ' ' + d['text']) for d in docs]
+    dts = [toks(d['title']) * 2 + toks(d['text']) for d in docs]
     n = len(docs)
     avg = (sum(len(x) for x in dts) / n) or 1
     df = {t: sum(1 for x in dts if t in x) for t in qt}
@@ -221,8 +222,25 @@ def http_get(url, data=None, timeout=8):
         return r.read().decode('utf-8', 'ignore')
 
 
+def wiki_exact(lang, q):
+    d = json.loads(http_get('https://%s.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=1&explaintext=1'
+                            '&exchars=1100&redirects=1&titles=%s' % (lang, urllib.parse.quote(q))))
+    for p in ((d.get('query') or {}).get('pages') or {}).values():
+        ex = p.get('extract') or ''
+        if 'missing' not in p and ex and not re.search(r'peut désigner|may refer to|peut faire référence', ex[:250]):
+            return [['Wikipédia - ' + p['title'], c] for c in chunk_text(ex, 500)]
+    return []
+
+
 def wiki_search(q):
     for lang in ('fr', 'en'):
+        if len(q.split()) <= 4:
+            try:
+                ex = wiki_exact(lang, q)
+            except Exception:
+                ex = []
+            if ex:
+                return ex
         url = ('https://%s.wikipedia.org/w/api.php?action=query&format=json&generator=search&gsrlimit=2'
                '&prop=extracts&exintro=1&explaintext=1&exchars=1100&redirects=1&gsrsearch=%s'
                % (lang, urllib.parse.quote(q)))
@@ -311,6 +329,7 @@ def live_search(q, mode, year):
 
 
 def rag(text, mode, year):
+    t0 = time.time()
     q = entity(text)
     maxage = 1800 if mode == 'fresh' else 7 * 86400
     hits = [h for h in bm25_rank(q, kb_docs(maxage)) if h[1] >= 0.5]
@@ -333,7 +352,8 @@ def rag(text, mode, year):
         if old:
             hits, status = old, 'stale'
     if not hits:
-        return {'ctx': '', 'sources': [], 'status': 'fail' if all_failed else 'empty', 'error': err, 'age': 0}
+        return {'ctx': '', 'sources': [], 'status': 'fail' if all_failed else 'empty', 'error': err, 'age': 0,
+                'q': q, 'ms': round(time.time() - t0, 1), 'n': 0}
     best = hits[0][0]
     top = [h for h in hits if h[0] >= 0.6 * best][:2]
     ctx = '\n'.join('[%s] %s' % (h[2]['title'][:60], h[2]['text'][:320]) for h in top)[:700]
@@ -341,7 +361,7 @@ def rag(text, mode, year):
     for h in top:
         if h[2]['title'] not in srcs:
             srcs.append(h[2]['title'])
-    return {'ctx': ctx, 'sources': srcs, 'status': status, 'error': err,
+    return {'ctx': ctx, 'sources': srcs, 'status': status, 'error': err, 'q': q, 'ms': round(time.time() - t0, 1), 'n': len(top),
             'age': time.time() - max(h[2]['ts'] for h in top) if status == 'stale' else 0}
 
 
@@ -691,7 +711,8 @@ def generate(gid, text, lang, voice, mem, web, pref, dt):
         info = {'ctx': LASTWEB['ctx'], 'sources': LASTWEB['sources'], 'status': 'ok', 'error': '', 'age': 0}
     if GEN['id'] != gid:
         return
-    GEN.update(web_status=info['status'], web_error=info['error'], sources=info['sources'] if info['ctx'] else [])
+    GEN.update(web_status=info['status'], web_error=info['error'], sources=info['sources'] if info['ctx'] else [],
+                   web_q=info.get('q', ''), web_ms=info.get('ms', 0), web_n=info.get('n', 0))
     if mode == 'fresh' and info['status'] in ('fail', 'empty'):
         msg = (NOWEB if info['status'] == 'fail' else NOTFOUND)['EN' if lang == 'EN' else 'FR']
         return finish_direct(gid, msg, voice, lang, info['status'], info['error'])
@@ -757,7 +778,7 @@ def start_ask(data):
     GEN['id'] += 1
     gid = GEN['id']
     GEN.update(text='', done=False, brain=True, stage='', truncated=False, web_status='none', web_error='',
-               sources=[], hold=False, ttft=None, dur=None)
+               sources=[], hold=False, ttft=None, dur=None, web_q='', web_ms=0, web_n=0)
     threading.Thread(target=generate, daemon=True,
                      args=(gid, str(data.get('text', '')), data.get('lang', 'FR'), data.get('voice', 0),
                            data.get('mem', 1), data.get('web', 1), data.get('model', 'auto'),
@@ -770,7 +791,7 @@ def gen_state():
     return {'text': t, 'done': GEN['done'], 'brain': GEN['brain'], 'id': GEN['id'],
             'stage': GEN['stage'], 'model': GEN['model'], 'truncated': GEN['truncated'],
             'web_status': GEN['web_status'], 'web_error': GEN['web_error'], 'sources': GEN['sources'],
-            'ttft': GEN['ttft'], 'dur': GEN['dur']}
+            'ttft': GEN['ttft'], 'dur': GEN['dur'], 'web_q': GEN['web_q'], 'web_ms': GEN['web_ms'], 'web_n': GEN['web_n']}
 
 
 def memory_info():
