@@ -1,7 +1,8 @@
-import os, json, threading, time, re, sqlite3, ssl, html, math, unicodedata, datetime, concurrent.futures
+import os, json, threading, time, re, sqlite3, ssl, html, math, unicodedata, datetime, hashlib, concurrent.futures
 import urllib.request, urllib.parse
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+import brain
 
 BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web')
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
@@ -11,7 +12,7 @@ CODER = 'http://127.0.0.1:8081'
 NOBRAIN = "Mon cerveau démarre, patiente quelques secondes."
 ST = {'active': False, 't0': 0.0, 'err': None}
 GEN = {'id': 0, 'text': '', 'done': True, 'brain': True, 'stage': '', 'model': 'general', 'truncated': False,
-       'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None, 'web_q': '', 'web_ms': 0, 'web_n': 0}
+       'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None, 'web_q': '', 'web_ms': 0, 'web_n': 0, 'route': ''}
 LASTWEB = {'ts': 0, 'ctx': '', 'sources': [], 'q': '', 'mode': None}
 VOUS = re.compile(r"\b(vous|votre|vos)\b", re.I)
 CODE_RE = re.compile(r"\b(code|coder|coding|python|javascript|java|html|css|bash|shell|termux|linux|script|fonction|"
@@ -687,6 +688,10 @@ def news_answer(text):
     t = text.lower()
     if not re.search(r"\b(actualités?|actu|les infos|les nouvelles|gros titres|les titres)\b", t) or len(t.split()) > 8 or ' sur ' in t:
         return None
+    if re.search(r"\b(nba|basket|foot|football|tennis|économie|politique|tech|technologie|crypto|cinéma|musique|jeux?)\b", t):
+        return None
+    if re.search(r"(actualités?|actu|infos?|nouvelles|news)\s+(?:de |du |des |d'|sur |à propos |concernant |autour |en |à la |au )(?!jour|moment|sports?|la journée|aujourd|ce jour|l'afrique|afrique|monde|du monde|le monde|sénégal|ce matin|ce soir|hier|demain)", t):
+        return None
     import xml.etree.ElementTree as ET
     sec = 'sports' if 'sport' in t else 'monde' if 'monde' in t else 'afrique'
     root = ET.fromstring(http_get('https://www.rfi.fr/fr/%s/rss' % sec))
@@ -726,6 +731,100 @@ def api_answer(text):
     return None
 
 
+# ---------- routeur sémantique (modèle d'embeddings dans un second serveur) ----------
+ROUTES = {
+    'meteo': ["quel temps fait-il à Dakar", "il va pleuvoir demain ?", "la météo de ce week-end", "à quelle heure se couche le soleil",
+              "quelle est la température dehors", "quel temps fera-t-il demain à Thiès", "est-ce qu'il va faire chaud à Saint-Louis",
+              "il pleut à Paris en ce moment ?", "la météo d'Abidjan cette semaine", "faut-il prendre un parapluie aujourd'hui",
+              "will it rain tomorrow", "what's the weather like"],
+    'devise': ["combien font 100 euros en francs CFA", "le taux de change du dollar", "convertis 50 dollars en euros", "un euro vaut combien en CFA",
+               "100 000 francs CFA en euros", "combien de dirhams pour un euro", "le cours de la livre sterling", "change mes dollars en francs CFA",
+               "how much is 20 dollars in euros", "taux euro naira"],
+    'crypto': ["prix du bitcoin", "combien vaut l'ethereum aujourd'hui", "le cours du bitcoin", "combien coûte un bitcoin en euros",
+               "l'ethereum monte ou descend", "valeur de la solana", "bitcoin price today", "le bitcoin a combien baissé", "cours des cryptomonnaies"],
+    'actu_generale': ["les actualités du jour", "quelles sont les infos du monde", "donne-moi les titres de l'actualité", "les nouvelles de l'Afrique",
+                      "les infos du moment", "quoi de neuf dans le monde aujourd'hui", "les actualités du sport", "what's the news today"],
+    'sport_scores': ["les scores de la NBA", "qui a gagné les Lakers hier soir", "résultat du match de basket", "le score du match de ce soir",
+                     "quel est le résultat de la NBA", "les Celtics ont gagné ?", "scores NBA d'hier", "classement du championnat", "NBA scores last night"],
+    'recherche_web': ["quelle est l'actualité de la NBA", "qui est le président du Sénégal", "dernières nouvelles sur la politique en France",
+                      "le prix de l'or aujourd'hui", "que s'est-il passé à Dakar cette semaine", "qui a gagné la dernière coupe d'Afrique",
+                      "quand sort le prochain film Marvel", "le prix du dernier iPhone", "qui est le meilleur joueur de la NBA en ce moment",
+                      "les infos sur le président du Sénégal", "où en est la situation en Ukraine", "qui est le champion du monde de football",
+                      "les résultats de l'élection", "est-ce que Messi joue encore", "latest news about the NBA",
+                      "recherche sur internet les offres de clubs de basket en Italie"],
+    'encyclopedie': ["c'est quoi la blockchain", "explique-moi la photosynthèse", "définition du mot amère", "définition du mot discipline",
+                     "qui est Léopold Sédar Senghor", "parle-moi de l'histoire du Sénégal", "pourquoi le ciel est bleu", "comment fonctionne un moteur",
+                     "qui était Napoléon", "quelle est la capitale du Japon", "que veut dire le mot résilience", "explique-moi ce qu'est l'inflation",
+                     "combien y a-t-il de joueurs dans une équipe de basket", "what is photosynthesis"],
+    'conversation': ["salut ça va ?", "tu t'appelles comment", "raconte-moi une histoire", "merci beaucoup", "peux-tu me motiver ?", "je suis fatigué",
+                     "bonne nuit", "raconte-moi une blague", "qu'est-ce que tu penses de moi", "tu peux m'aider ?", "donne-moi un conseil pour mieux dormir",
+                     "je me sens stressé avant mon match", "qui es-tu ?", "hello how are you", "tu fais quoi ?", "dis-moi quelque chose de gentil"],
+    'code': ["écris une fonction python qui trie une liste", "pourquoi mon script bash ne marche pas", "explique ce code javascript",
+             "corrige cette erreur dans mon programme", "comment faire une boucle en python", "écris un script pour renommer des fichiers",
+             "write a python function"],
+    'action_telephone': ["mets une alarme à six heures", "réveille-moi à 7 heures", "appelle maman", "appelle mon frère", "ouvre YouTube",
+                         "mets un minuteur de dix minutes", "envoie un message à Moussa", "lance de la musique", "allume la lampe torche",
+                         "emmène-moi à la gare", "mets le volume à fond", "set an alarm for 6 am"],
+}
+RT = {'ready': False, 'vecs': {}, 'err': ''}
+
+
+def emb_vec(text):
+    req = urllib.request.Request('http://127.0.0.1:%d/v1/embeddings' % brain.EMB_PORT, json.dumps({'input': text, 'model': 'x'}).encode(),
+                                 {'Content-Type': 'application/json'})
+    v = json.loads(urllib.request.urlopen(req, timeout=20).read())['data'][0]['embedding']
+    n = math.sqrt(sum(x * x for x in v)) or 1.0
+    return [x / n for x in v]
+
+
+def router_init():
+    while True:
+        try:
+            while brain.EMB['stage'] != 'ready':
+                time.sleep(3)
+            sig = hashlib.md5(json.dumps(ROUTES, sort_keys=True).encode()).hexdigest()
+            path = os.path.join(DATA, 'routes_cache.json')
+            try:
+                c = json.load(open(path))
+                if c.get('sig') == sig:
+                    RT['vecs'], RT['ready'] = c['vecs'], True
+                    return
+            except Exception:
+                pass
+            vecs = {k: [emb_vec(t) for t in v] for k, v in ROUTES.items()}
+            json.dump({'sig': sig, 'vecs': vecs}, open(path, 'w'))
+            RT['vecs'], RT['ready'] = vecs, True
+            return
+        except Exception as e:
+            RT['err'] = repr(e)
+            time.sleep(10)
+
+
+def route(text):
+    if not RT['ready']:
+        return None
+    try:
+        v = emb_vec(text[:200])
+    except Exception:
+        return None
+    sc = sorted(((max(sum(a * b for a, b in zip(v, e)) for e in es), k) for k, es in RT['vecs'].items()), reverse=True)
+    (s1, k1), (s2, k2) = sc[0], sc[1]
+    return {'intent': k1, 'score': round(s1, 2), 'second': k2, 'margin': round(s1 - s2, 2), 'conf': s1 >= 0.45 and (s1 - s2) >= 0.04}
+
+
+def apply_route(rt, mode):
+    if not rt or not rt['conf']:
+        return mode
+    it = rt['intent']
+    if it in ('recherche_web', 'actu_generale', 'sport_scores'):
+        return 'fresh'
+    if it == 'encyclopedie':
+        return mode or 'enc'
+    if it in ('conversation', 'code', 'action_telephone') and mode == 'enc' and rt['score'] >= 0.6:
+        return None
+    return mode
+
+
 def generate(gid, text, lang, voice, mem, web, pref, dt):
     t0 = time.time()
     if lang != 'EN' and CLOCK.search(text):
@@ -737,6 +836,10 @@ def generate(gid, text, lang, voice, mem, web, pref, dt):
             return finish_direct(gid, r[0], voice, lang, 'ok')
     model = pick(text, pref)
     mode = web_mode(text, model) if web else None
+    follow = bool(web and FOLLOW.search(text) and LASTWEB['ctx'] and time.time() - LASTWEB['ts'] < 600)
+    rt = route(text) if (web and not follow) else None
+    mode = apply_route(rt, mode)
+    GEN['route'] = ('%s %.2f%s' % (rt['intent'], rt['score'], '' if rt['conf'] else ' (incertain, 2e : %s)' % rt['second'])) if rt else ''
     info = {'ctx': '', 'sources': [], 'status': 'none', 'error': '', 'age': 0}
     if mode:
         GEN.update(stage='search', hold=(mode == 'fresh'))
@@ -826,7 +929,7 @@ def start_ask(data):
     GEN['id'] += 1
     gid = GEN['id']
     GEN.update(text='', done=False, brain=True, stage='', truncated=False, web_status='none', web_error='',
-               sources=[], hold=False, ttft=None, dur=None, web_q='', web_ms=0, web_n=0)
+               sources=[], hold=False, ttft=None, dur=None, web_q='', web_ms=0, web_n=0, route='')
     threading.Thread(target=generate, daemon=True,
                      args=(gid, str(data.get('text', '')), data.get('lang', 'FR'), data.get('voice', 0),
                            data.get('mem', 1), data.get('web', 1), data.get('model', 'auto'),
@@ -839,7 +942,7 @@ def gen_state():
     return {'text': t, 'done': GEN['done'], 'brain': GEN['brain'], 'id': GEN['id'],
             'stage': GEN['stage'], 'model': GEN['model'], 'truncated': GEN['truncated'],
             'web_status': GEN['web_status'], 'web_error': GEN['web_error'], 'sources': GEN['sources'],
-            'ttft': GEN['ttft'], 'dur': GEN['dur'], 'web_q': GEN['web_q'], 'web_ms': GEN['web_ms'], 'web_n': GEN['web_n']}
+            'ttft': GEN['ttft'], 'dur': GEN['dur'], 'web_q': GEN['web_q'], 'web_ms': GEN['web_ms'], 'web_n': GEN['web_n'], 'route': GEN['route']}
 
 
 def memory_info():
@@ -1030,7 +1133,7 @@ class H(SimpleHTTPRequestHandler):
         if u.path == '/api/brain':
             try:
                 import brain
-                return self._json(brain.ST)
+                return self._json(dict(brain.ST, emb=brain.EMB))
             except Exception as e:
                 return self._json({'stage': 'error', 'err': repr(e), 'pct': 0})
         if u.path == '/api/netcheck':
@@ -1096,5 +1199,6 @@ if ANDROID:
 if not os.environ.get('JULIA_NOSERVER'):
     import brain
     threading.Thread(target=brain.ensure, daemon=True).start()
+    threading.Thread(target=router_init, daemon=True).start()
     threading.Thread(target=warmup, daemon=True).start()
     ThreadingHTTPServer(('127.0.0.1', 5000), H).serve_forever()
