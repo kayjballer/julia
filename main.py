@@ -12,7 +12,7 @@ CODER = 'http://127.0.0.1:8081'
 NOBRAIN = "Mon cerveau démarre, patiente quelques secondes."
 ST = {'active': False, 't0': 0.0, 'err': None}
 GEN = {'id': 0, 'text': '', 'done': True, 'brain': True, 'stage': '', 'model': 'general', 'truncated': False,
-       'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None, 'web_q': '', 'web_ms': 0, 'web_n': 0, 'route': ''}
+       'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None, 'web_q': '', 'web_ms': 0, 'web_n': 0, 'route': '', 'act': ''}
 LASTWEB = {'ts': 0, 'ctx': '', 'sources': [], 'q': '', 'mode': None}
 VOUS = re.compile(r"\b(vous|votre|vos)\b", re.I)
 CODE_RE = re.compile(r"\b(code|coder|coding|python|javascript|java|html|css|bash|shell|termux|linux|script|fonction|"
@@ -825,10 +825,203 @@ def apply_route(rt, mode):
     return mode
 
 
+# ---------- actions du téléphone (phase C1) ----------
+PENDING = {'act': None, 'ts': 0}
+YES = re.compile(r"^\W*(oui|ouais|ok|okay|d'accord|vas-y|go|confirme|c'est bon|yes)\b", re.I)
+NO = re.compile(r"^\W*(non|annule|laisse tomber|stop|pas maintenant|nope)\b", re.I)
+UN_ = {'zéro': 0, 'zero': 0, 'un': 1, 'une': 1, 'deux': 2, 'trois': 3, 'quatre': 4, 'cinq': 5, 'six': 6, 'sept': 7, 'huit': 8, 'neuf': 9,
+       'dix': 10, 'onze': 11, 'douze': 12, 'treize': 13, 'quatorze': 14, 'quinze': 15, 'seize': 16}
+TENS_ = {'vingt': 20, 'vingts': 20, 'trente': 30, 'quarante': 40, 'cinquante': 50, 'soixante': 60}
+WORDS_ = '|'.join(sorted(list(UN_) + list(TENS_), key=len, reverse=True))
+TORCH = {'on': False}
+
+
+def nw(s):
+    s = s.replace('quatre-vingts', '80').replace('quatre-vingt', '80').replace('quatre vingt', '80')
+    n = 0
+    for w in re.split(r"[\s-]+", s):
+        n += UN_.get(w) if w in UN_ else TENS_.get(w) if w in TENS_ else int(w) if w.isdigit() else 0
+    return n
+
+
+def digits(t):
+    return re.sub(r"\b(?:%s)(?:[ -](?:et[ -])?(?:%s))*\b" % (WORDS_, WORDS_), lambda m: str(nw(m.group(0).replace(' et ', ' '))), t)
+
+
+def parse_time(t):
+    m = re.search(r"\b(?:à|a|pour)\s+(\d{1,2})\s*(?:heures?|h|:)\s*(?:(\d{1,2})|(et quart)|(et demie?)|(moins le quart))?", t)
+    if m:
+        h = int(m.group(1))
+        mi = int(m.group(2)) if m.group(2) else 15 if m.group(3) else 30 if m.group(4) else 0
+        if m.group(5):
+            h, mi = h - 1, 45
+    elif re.search(r"\bà midi\b", t):
+        h, mi = 12, 0
+    elif re.search(r"\bà minuit\b", t):
+        h, mi = 0, 0
+    else:
+        return None
+    if re.search(r"(du soir|de l'après-midi|de l'apres-midi)", t) and h < 12:
+        h += 12
+    return (h % 24, mi) if (0 <= h <= 24 and 0 <= mi < 60) else None
+
+
+def parse_duration(t):
+    sec = 0
+    for n, u in re.findall(r"(\d+)\s*(secondes?|minutes?|min|heures?|h)\b", t):
+        sec += int(n) * (1 if u.startswith('s') else 60 if u.startswith('m') else 3600)
+    m = re.search(r"(\d+)\s*(?:heures?|h)\s*(\d{1,2})\b(?!\s*(?:secondes?|minutes?|min|heures?|h)\b)", t)
+    if m:
+        sec += int(m.group(2)) * 60
+    if re.search(r"heures? et demie?", t):
+        sec += 1800
+    if "quart d'heure" in t:
+        sec += 900
+    return sec
+
+
+def hm_txt(h, m):
+    return '%d h %02d' % (h, m) if m else '%d h' % h
+
+
+def dur_txt(sec):
+    h, r = divmod(sec, 3600)
+    m, s = divmod(r, 60)
+    p = ([('%d heure%s' % (h, 's' if h > 1 else ''))] if h else []) + ([('%d minute%s' % (m, 's' if m > 1 else ''))] if m else []) + ([('%d seconde%s' % (s, 's' if s > 1 else ''))] if s else [])
+    return ' et '.join(p)
+
+
+def parse_action(text, dt):
+    s = text.lower().replace('’', "'").strip(' .!?')
+    t = digits(s)
+    if re.search(r"\b(appelle|téléphone à|envoie (?:un |1 )?(?:message|sms|texto)|écris à)\b", t):
+        return {'kind': 'say', 'msg': "Je ne sais pas encore appeler ni envoyer de messages, c'est prévu bientôt."}
+    if re.search(r"\b(alarme|réveille|réveil)\b", t):
+        m = re.search(r"\bdans\s+(\d+)\s*(minutes?|min|heures?|h)\b", t)
+        if m:
+            d = dt + datetime.timedelta(minutes=int(m.group(1)) * (60 if m.group(2).startswith('h') else 1))
+            hh, mi = d.hour, d.minute
+        else:
+            tm = parse_time(t)
+            if not tm:
+                return {'kind': 'say', 'msg': "À quelle heure veux-tu l'alarme ? Dis par exemple : mets une alarme à 6 h 30."}
+            hh, mi = tm
+        return {'kind': 'alarm', 'h': hh, 'm': mi, 'confirm': True, 'label': 'une alarme à ' + hm_txt(hh, mi)}
+    if re.search(r"\b(minuteur|minuterie|chrono|compte à rebours|timer)\b", t):
+        sec = parse_duration(t)
+        if not sec:
+            return {'kind': 'say', 'msg': 'Combien de temps ? Dis par exemple : minuteur de dix minutes.'}
+        return {'kind': 'timer', 'sec': sec, 'confirm': True, 'label': 'un minuteur de ' + dur_txt(sec)}
+    m = re.search(r"\b(allume|éteins|éteindre|active|désactive|coupe)\s+(?:la |le |l')?(lampe|torche|flash|lumière)", s)
+    if m:
+        on = m.group(1) in ('allume', 'active')
+        return {'kind': 'torch', 'on': on, 'label': 'la lampe torche ' + ('allumée' if on else 'éteinte')}
+    m = re.search(r"(?:cherche|recherche|trouve|mets|joue|lance)\s+(.+?)\s+sur youtube", s)
+    if m:
+        return {'kind': 'youtube', 'q': m.group(1), 'label': 'YouTube : ' + m.group(1)}
+    m = (re.search(r"(?:emmène|amène|conduis|guide)[- ]moi\s+(?:à la |à l'|au |aux |à |vers |chez )?(.+)", s) or re.search(r"itinéraire\s+(?:pour |vers |jusqu'à |à )?(.+)", s)
+         or re.search(r"navigue\s+(?:vers |à )?(.+)", s) or re.search(r"comment (?:aller|se rendre|j'y vais)\s+(?:à la |à l'|au |aux |à )?(.+)", s))
+    if m:
+        return {'kind': 'nav', 'dest': m.group(1).strip(), 'label': 'itinéraire vers ' + m.group(1).strip()}
+    m = re.search(r"\b(?:ouvre|ouvrir|lance|lancer|démarre)\s+(?:l'application |l'appli |l'app |l'|la |le |les )?([a-zà-ÿ0-9' -]{2,30})$", s)
+    if m:
+        return {'kind': 'app', 'name': m.group(1).strip(), 'label': m.group(1).strip()}
+    return None
+
+
+def droid():
+    from jnius import autoclass
+    return autoclass('org.kivy.android.PythonActivity').mActivity
+
+
+def find_app(name):
+    from jnius import autoclass
+    Intent = autoclass('android.content.Intent')
+    ctx_ = droid()
+    pm = ctx_.getPackageManager()
+    i = Intent(Intent.ACTION_MAIN)
+    i.addCategory(Intent.CATEGORY_LAUNCHER)
+    apps = pm.queryIntentActivities(i, 0)
+    best, bs = None, 0
+    want = fold(name)
+    for k in range(apps.size()):
+        ri = apps.get(k)
+        label = fold(ri.loadLabel(pm).toString())
+        sc = 3 if label == want else 2 if (want in label or label in want) else 0
+        if sc > bs:
+            best, bs = ri.activityInfo.packageName, sc
+    return pm.getLaunchIntentForPackage(best) if best else None
+
+
+def do_action(a):
+    try:
+        from jnius import autoclass, cast
+        Intent, Uri = autoclass('android.content.Intent'), autoclass('android.net.Uri')
+        AC = autoclass('android.provider.AlarmClock')
+        ctx_, k = droid(), a['kind']
+        if k == 'alarm':
+            i = Intent(AC.ACTION_SET_ALARM)
+            i.putExtra(AC.EXTRA_HOUR, int(a['h']))
+            i.putExtra(AC.EXTRA_MINUTES, int(a['m']))
+            i.putExtra(AC.EXTRA_MESSAGE, 'Julia')
+            i.putExtra(AC.EXTRA_SKIP_UI, True)
+            ctx_.startActivity(i)
+        elif k == 'timer':
+            i = Intent(AC.ACTION_SET_TIMER)
+            i.putExtra(AC.EXTRA_LENGTH, int(a['sec']))
+            i.putExtra(AC.EXTRA_SKIP_UI, True)
+            ctx_.startActivity(i)
+        elif k == 'torch':
+            cm = cast('android.hardware.camera2.CameraManager', ctx_.getSystemService('camera'))
+            cm.setTorchMode(cm.getCameraIdList()[0], bool(a['on']))
+            TORCH['on'] = a['on']
+        elif k == 'youtube':
+            ctx_.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse('https://www.youtube.com/results?search_query=' + urllib.parse.quote(a['q']))))
+        elif k == 'nav':
+            i = Intent(Intent.ACTION_VIEW, Uri.parse('google.navigation:q=' + urllib.parse.quote(a['dest'])))
+            i.setPackage('com.google.android.apps.maps')
+            try:
+                ctx_.startActivity(i)
+            except Exception:
+                ctx_.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse('geo:0,0?q=' + urllib.parse.quote(a['dest']))))
+        elif k == 'app':
+            i = find_app(a['name'])
+            if not i:
+                return "Je n'ai pas trouvé l'application %s." % a['name']
+            ctx_.startActivity(i)
+        return 'C\'est fait : %s.' % a['label'] if k in ('alarm', 'timer', 'torch') else 'Voilà.'
+    except Exception as e:
+        brain.log('action ' + repr(e))
+        return "Je n'ai pas réussi à le faire sur le téléphone."
+
+
+def act_flow(gid, text, dt, voice, lang):
+    pend = PENDING['act'] and time.time() - PENDING['ts'] < 90
+    a, PENDING['act'] = PENDING['act'], None
+    if pend and YES.search(text):
+        return finish_direct(gid, do_action(a), voice, lang) or True
+    if pend and NO.search(text):
+        return finish_direct(gid, "D'accord, j'annule.", voice, lang) or True
+    a = parse_action(text, dt)
+    if not a:
+        return False
+    if a['kind'] == 'say':
+        finish_direct(gid, a['msg'], voice, lang)
+    elif a.get('confirm'):
+        PENDING.update(act=a, ts=time.time())
+        GEN['act'] = '1'
+        finish_direct(gid, 'Je mets %s. Tu confirmes ?' % a['label'], voice, lang)
+    else:
+        finish_direct(gid, do_action(a), voice, lang)
+    return True
+
+
 def generate(gid, text, lang, voice, mem, web, pref, dt):
     t0 = time.time()
     if lang != 'EN' and CLOCK.search(text):
         return finish_direct(gid, clock_answer(text, dt), voice, lang)
+    if lang != 'EN' and act_flow(gid, text, dt, voice, lang):
+        return
     if lang != 'EN' and web:
         r = api_answer(text)
         if r:
@@ -929,7 +1122,7 @@ def start_ask(data):
     GEN['id'] += 1
     gid = GEN['id']
     GEN.update(text='', done=False, brain=True, stage='', truncated=False, web_status='none', web_error='',
-               sources=[], hold=False, ttft=None, dur=None, web_q='', web_ms=0, web_n=0, route='')
+               sources=[], hold=False, ttft=None, dur=None, web_q='', web_ms=0, web_n=0, route='', act='')
     threading.Thread(target=generate, daemon=True,
                      args=(gid, str(data.get('text', '')), data.get('lang', 'FR'), data.get('voice', 0),
                            data.get('mem', 1), data.get('web', 1), data.get('model', 'auto'),
@@ -942,7 +1135,7 @@ def gen_state():
     return {'text': t, 'done': GEN['done'], 'brain': GEN['brain'], 'id': GEN['id'],
             'stage': GEN['stage'], 'model': GEN['model'], 'truncated': GEN['truncated'],
             'web_status': GEN['web_status'], 'web_error': GEN['web_error'], 'sources': GEN['sources'],
-            'ttft': GEN['ttft'], 'dur': GEN['dur'], 'web_q': GEN['web_q'], 'web_ms': GEN['web_ms'], 'web_n': GEN['web_n'], 'route': GEN['route']}
+            'ttft': GEN['ttft'], 'dur': GEN['dur'], 'web_q': GEN['web_q'], 'web_ms': GEN['web_ms'], 'web_n': GEN['web_n'], 'route': GEN['route'], 'act': GEN['act']}
 
 
 def memory_info():
