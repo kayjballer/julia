@@ -549,7 +549,7 @@ def stream_brain(model, messages, on_text, text):
     code = model == 'code'
     n = 520 if code else (380 if LONG_RE.search(text) else 150)
     body = json.dumps({'messages': messages, 'max_tokens': n, 'temperature': 0.2 if code else 0.5,
-                       'top_p': 0.9, 'repeat_penalty': 1.1, 'stream': True, 'cache_prompt': True}).encode()
+                       'top_p': 0.9, 'repeat_penalty': 1.1, 'stream': True, 'cache_prompt': True, 'id_slot': 0}).encode()
     url = (CODER if code else GENERAL) + '/v1/chat/completions'
     req = urllib.request.Request(url, data=body, headers={'Content-Type': 'application/json'})
     finish = None
@@ -764,7 +764,7 @@ ROUTES = {
              "write a python function"],
     'action_telephone': ["mets une alarme à six heures", "réveille-moi à 7 heures", "appelle maman", "appelle mon frère", "ouvre YouTube",
                          "mets un minuteur de dix minutes", "envoie un message à Moussa", "lance de la musique", "allume la lampe torche",
-                         "emmène-moi à la gare", "mets le volume à fond", "set an alarm for 6 am"],
+                         "emmène-moi à la gare", "mets le volume à fond", "set an alarm for 6 am", "éteins la lampe torche", "éteint la lampe de poche", "allume le flash", "coupe la lumière du téléphone", "ouvre WhatsApp", "lance l'application de notes", "ouvre mon appli de banque", "va sur Instagram", "ouvre les paramètres", "prends une note", "note que j'ai entraînement demain", "écris à Moussa que j'arrive", "envoie un SMS à ma mère", "appelle Moussa", "passe un appel à papa", "mets du Burna Boy", "joue de la musique", "lance ma playlist", "mets un chrono d'une heure", "préviens-moi dans vingt minutes", "programme un réveil demain à 6 heures", "lis-moi mes notes", "cherche des vidéos de dunk sur YouTube", "emmène-moi au stade", "itinéraire pour aller à Thiès"],
 }
 RT = {'ready': False, 'vecs': {}, 'err': ''}
 
@@ -801,6 +801,12 @@ def router_init():
 
 
 def route(text):
+    if RT.get('lt') != text:
+        RT['lt'], RT['lr'] = text, route_raw(text)
+    return RT['lr']
+
+
+def route_raw(text):
     if not RT['ready']:
         return None
     try:
@@ -934,25 +940,6 @@ def droid():
     return autoclass('org.kivy.android.PythonActivity').mActivity
 
 
-def find_app(name):
-    from jnius import autoclass
-    Intent = autoclass('android.content.Intent')
-    ctx_ = droid()
-    pm = ctx_.getPackageManager()
-    i = Intent(Intent.ACTION_MAIN)
-    i.addCategory(Intent.CATEGORY_LAUNCHER)
-    apps = pm.queryIntentActivities(i, 0)
-    best, bs = None, 0
-    want = fold(name)
-    for k in range(apps.size()):
-        ri = apps.get(k)
-        label = fold(ri.loadLabel(pm).toString())
-        sc = 3 if label == want else 2 if (want in label or label in want) else 0
-        if sc > bs:
-            best, bs = ri.activityInfo.packageName, sc
-    return pm.getLaunchIntentForPackage(best) if best else None
-
-
 def do_action(a):
     try:
         from jnius import autoclass, cast
@@ -1011,6 +998,274 @@ def act_flow(gid, text, dt, voice, lang):
         PENDING.update(act=a, ts=time.time())
         GEN['act'] = '1'
         finish_direct(gid, 'Je mets %s. Tu confirmes ?' % a['label'], voice, lang)
+    else:
+        finish_direct(gid, do_action(a), voice, lang)
+    return True
+
+
+# ---------- actions en langage naturel : routeur, puis Qwen produit un ordre JSON ----------
+ACT_SYS = ("<|im_start|>system\nTu convertis une demande en commande JSON pour un téléphone. Actions : torch(on), alarm(h,m), alarm_in(minutes), "
+           "timer(hours,minutes,seconds), open_app(name), navigate(dest), youtube(q), music(q), call(name), sms(name,text), note(text,app), notes_read, none.\n"
+           "Exemples :\n"
+           "éteint la lampe de poche => {\"action\":\"torch\",\"on\":false}\n"
+           "réveille-moi à sept heures et quart => {\"action\":\"alarm\",\"h\":7,\"m\":15}\n"
+           "préviens-moi dans vingt minutes => {\"action\":\"alarm_in\",\"minutes\":20}\n"
+           "mets un chrono d'une heure et demie => {\"action\":\"timer\",\"hours\":1,\"minutes\":30,\"seconds\":0}\n"
+           "ouvre mon appli de notes => {\"action\":\"open_app\",\"name\":\"notes\"}\n"
+           "note que j'ai entraînement demain => {\"action\":\"note\",\"text\":\"entraînement demain\"}\n"
+           "écris à Moussa que j'arrive => {\"action\":\"sms\",\"name\":\"Moussa\",\"text\":\"j'arrive\"}\n"
+           "mets du Burna Boy => {\"action\":\"music\",\"q\":\"Burna Boy\"}\n"
+           "quel temps fait-il => {\"action\":\"none\"}\n<|im_end|>\n<|im_start|>user\n")
+ACT_NAMES = ['torch', 'alarm', 'alarm_in', 'timer', 'open_app', 'navigate', 'youtube', 'music', 'call', 'sms', 'note', 'notes_read', 'none']
+ACT_SCHEMA = {'type': 'object', 'properties': dict([('action', {'enum': ACT_NAMES}), ('on', {'type': 'boolean'})] + [(k, {'type': 'integer'}) for k in ('h', 'm', 'minutes', 'hours', 'seconds')]
+                                                  + [(k, {'type': 'string'}) for k in ('name', 'dest', 'q', 'text', 'app')]), 'required': ['action']}
+ACTV = re.compile(r"^\W*(?:peux-tu |tu peux |pourrais-tu |s'il te plaît |stp )?(allume|éteins|éteint|coupe|ouvre|ouvrir|lance|lancer|mets|mettre|réveille|appelle|envoie|écris|note|prends|"
+                  r"cherche|emmène|lis|joue|démarre|active|désactive|programme|règle|préviens|passe)\b", re.I)
+APPV, APPCACHE = {}, {'ts': 0, 'apps': []}
+
+
+def llm_action(text, dt):
+    prompt = ACT_SYS + 'Heure : %02d:%02d. Demande : %s<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n' % (dt.hour, dt.minute, text[:200])
+    body = json.dumps({'prompt': prompt, 'json_schema': ACT_SCHEMA, 'n_predict': 70, 'temperature': 0, 'cache_prompt': True, 'id_slot': 1}).encode()
+    r = json.loads(urllib.request.urlopen(urllib.request.Request(GENERAL + '/completion', body, {'Content-Type': 'application/json'}), timeout=90).read())
+    return json.loads(r.get('content') or '{}')
+
+
+def act_from_json(j, dt, text):
+    a = str(j.get('action', 'none'))
+
+    def I(k):
+        try:
+            return int(j.get(k) or 0)
+        except Exception:
+            return 0
+    s = lambda k: str(j.get(k) or '').strip()
+    if a == 'torch':
+        on = bool(j.get('on'))
+        return {'kind': 'torch', 'on': on, 'label': 'la lampe torche ' + ('allumée' if on else 'éteinte')}
+    if a == 'alarm' and 0 <= I('h') <= 23 and 0 <= I('m') < 60:
+        return {'kind': 'alarm', 'h': I('h'), 'm': I('m'), 'confirm': True, 'label': 'une alarme à ' + hm_txt(I('h'), I('m'))}
+    if a == 'alarm_in' and I('minutes') > 0:
+        d = dt + datetime.timedelta(minutes=I('minutes'))
+        return {'kind': 'alarm', 'h': d.hour, 'm': d.minute, 'confirm': True, 'label': 'une alarme à ' + hm_txt(d.hour, d.minute)}
+    if a == 'timer':
+        sec = I('hours') * 3600 + I('minutes') * 60 + I('seconds')
+        if sec > 0:
+            return {'kind': 'timer', 'sec': sec, 'confirm': True, 'label': 'un minuteur de ' + dur_txt(sec)}
+    if a == 'open_app' and s('name'):
+        return {'kind': 'app', 'name': s('name'), 'label': s('name')}
+    if a == 'navigate' and s('dest'):
+        return {'kind': 'nav', 'dest': s('dest'), 'label': 'itinéraire vers ' + s('dest')}
+    if a == 'youtube' and s('q'):
+        return {'kind': 'youtube', 'q': s('q'), 'label': 'YouTube : ' + s('q')}
+    if a == 'music' and s('q'):
+        return {'kind': 'music', 'q': s('q'), 'label': 'musique : ' + s('q')}
+    if a == 'call' and s('name'):
+        return {'kind': 'call', 'name': s('name'), 'confirm': True, 'ask': "J'appelle %s. Tu confirmes ?" % s('name'), 'label': 'appel'}
+    if a == 'sms' and s('name'):
+        return {'kind': 'sms', 'name': s('name'), 'text': s('text'), 'confirm': True,
+                'ask': 'Je prépare un message pour %s : « %s ». Tu confirmes ?' % (s('name'), s('text')), 'label': 'message'}
+    if a == 'note' and s('text'):
+        return {'kind': 'note', 'text': s('text'), 'app': s('app'), 'label': 'noter : ' + s('text')}
+    if a == 'notes_read':
+        return {'kind': 'notes_read', 'label': 'notes'}
+    return None
+
+
+def installed_apps():
+    if APPCACHE['apps'] and time.time() - APPCACHE['ts'] < 300:
+        return APPCACHE['apps']
+    from jnius import autoclass
+    Intent = autoclass('android.content.Intent')
+    pm = droid().getPackageManager()
+    i = Intent(Intent.ACTION_MAIN)
+    i.addCategory(Intent.CATEGORY_LAUNCHER)
+    lst = pm.queryIntentActivities(i, 0)
+    seen, out = set(), []
+    for k in range(lst.size()):
+        ri = lst.get(k)
+        pkg = ri.activityInfo.packageName
+        if pkg not in seen:
+            seen.add(pkg)
+            out.append((ri.loadLabel(pm).toString(), pkg))
+    APPCACHE.update(ts=time.time(), apps=out)
+    return out
+
+
+def match_app(name, apps):
+    want = fold(name)
+    lex = sorted(((3 if fold(l) == want else 2 if (want in fold(l) or (len(fold(l)) > 2 and fold(l) in want)) else 0), l, p) for l, p in apps)[::-1]
+    if lex and lex[0][0] >= 2:
+        return (lex[0][1], lex[0][2]), []
+    if RT['ready'] and APPV:
+        try:
+            q = emb_vec(name)
+            sims = sorted(((sum(x * y for x, y in zip(q, APPV[l])), l, p) for l, p in apps if l in APPV), reverse=True)
+        except Exception:
+            sims = []
+        if sims and sims[0][0] >= 0.55 and (len(sims) < 2 or sims[0][0] - sims[1][0] >= 0.03):
+            return (sims[0][1], sims[0][2]), []
+        return None, [x[1] for x in sims[:3]]
+    return None, []
+
+
+def appvec_init():
+    while not RT['ready']:
+        time.sleep(5)
+    path = os.path.join(DATA, 'apps_cache.json')
+    try:
+        APPV.update(json.load(open(path)))
+    except Exception:
+        pass
+    try:
+        for l, p in installed_apps():
+            if l not in APPV:
+                APPV[l] = emb_vec(l)
+        json.dump(APPV, open(path, 'w'))
+    except Exception as e:
+        brain.log('appvec ' + repr(e))
+
+
+def act_warm():
+    while brain.ST.get('stage') != 'ready':
+        time.sleep(3)
+    try:
+        body = json.dumps({'prompt': ACT_SYS + 'x', 'n_predict': 1, 'cache_prompt': True, 'id_slot': 1}).encode()
+        urllib.request.urlopen(urllib.request.Request(GENERAL + '/completion', body, {'Content-Type': 'application/json'}), timeout=300).read()
+    except Exception as e:
+        brain.log('act_warm ' + repr(e))
+
+
+def contact_number(name):
+    from jnius import autoclass
+    from android.permissions import check_permission, request_permissions, Permission
+    if not check_permission(Permission.READ_CONTACTS):
+        request_permissions([Permission.READ_CONTACTS])
+        return None, "J'ai besoin d'accéder à tes contacts : autorise-le dans la fenêtre Android, puis redemande-moi."
+    Phone = autoclass('android.provider.ContactsContract$CommonDataKinds$Phone')
+    cur = droid().getContentResolver().query(Phone.CONTENT_URI, ['display_name', 'data1'], None, None, None)
+    best, bs, want = None, 0, fold(name)
+    while cur.moveToNext():
+        n, num = cur.getString(0) or '', cur.getString(1) or ''
+        f = fold(n)
+        sc = 3 if f == want else 2 if (want in f.split() or f.startswith(want)) else 1 if want in f else 0
+        if sc > bs:
+            best, bs = (n, num), sc
+    cur.close()
+    return (best, None) if best else (None, "Je n'ai pas trouvé %s dans tes contacts." % name)
+
+
+def do_action(a):
+    try:
+        from jnius import autoclass, cast
+        Intent, Uri = autoclass('android.content.Intent'), autoclass('android.net.Uri')
+        AC = autoclass('android.provider.AlarmClock')
+        ctx_, k = droid(), a['kind']
+        view = lambda u: ctx_.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)))
+        if k == 'alarm':
+            i = Intent(AC.ACTION_SET_ALARM)
+            i.putExtra(AC.EXTRA_HOUR, int(a['h']))
+            i.putExtra(AC.EXTRA_MINUTES, int(a['m']))
+            i.putExtra(AC.EXTRA_MESSAGE, 'Julia')
+            i.putExtra(AC.EXTRA_SKIP_UI, True)
+            ctx_.startActivity(i)
+        elif k == 'timer':
+            i = Intent(AC.ACTION_SET_TIMER)
+            i.putExtra(AC.EXTRA_LENGTH, int(a['sec']))
+            i.putExtra(AC.EXTRA_SKIP_UI, True)
+            ctx_.startActivity(i)
+        elif k == 'torch':
+            cm = cast('android.hardware.camera2.CameraManager', ctx_.getSystemService('camera'))
+            cm.setTorchMode(cm.getCameraIdList()[0], bool(a['on']))
+            TORCH['on'] = a['on']
+        elif k == 'youtube':
+            view('https://www.youtube.com/results?search_query=' + urllib.parse.quote(a['q']))
+        elif k == 'music':
+            MS, SM = autoclass('android.provider.MediaStore'), autoclass('android.app.SearchManager')
+            i = Intent(MS.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+            i.putExtra(SM.QUERY, a['q'])
+            i.putExtra(MS.EXTRA_MEDIA_FOCUS, 'vnd.android.cursor.item/*')
+            try:
+                ctx_.startActivity(i)
+            except Exception:
+                view('https://www.youtube.com/results?search_query=' + urllib.parse.quote(a['q']))
+        elif k == 'nav':
+            i = Intent(Intent.ACTION_VIEW, Uri.parse('google.navigation:q=' + urllib.parse.quote(a['dest'])))
+            i.setPackage('com.google.android.apps.maps')
+            try:
+                ctx_.startActivity(i)
+            except Exception:
+                view('geo:0,0?q=' + urllib.parse.quote(a['dest']))
+        elif k == 'app':
+            best, sugg = match_app(a['name'], installed_apps())
+            if not best:
+                return ("Je n'ai pas trouvé « %s ». Tu veux dire %s ?" % (a['name'], ' ou '.join(sugg))) if sugg else "Je n'ai pas trouvé l'application %s." % a['name']
+            ctx_.startActivity(ctx_.getPackageManager().getLaunchIntentForPackage(best[1]))
+            return 'Voilà, j\'ouvre %s.' % best[0]
+        elif k == 'note':
+            sql('CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, ts REAL, text TEXT)')
+            sql('INSERT INTO notes(ts, text) VALUES(?, ?)', (time.time(), a['text']))
+            if a.get('app'):
+                best, _ = match_app(a['app'], installed_apps())
+                if best:
+                    i = Intent(Intent.ACTION_SEND)
+                    i.setType('text/plain')
+                    i.putExtra(Intent.EXTRA_TEXT, a['text'])
+                    i.setPackage(best[1])
+                    ctx_.startActivity(i)
+                    return "C'est noté, et je l'envoie vers %s : appuie sur enregistrer." % best[0]
+            return "C'est noté : %s." % a['text']
+        elif k == 'notes_read':
+            sql('CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, ts REAL, text TEXT)')
+            rows = [r['text'] for r in sql('SELECT text FROM notes ORDER BY id DESC LIMIT 5', fetch=True)]
+            return ('Tes dernières notes : ' + ' ; '.join('%d, %s' % (n + 1, x) for n, x in enumerate(rows)) + '.') if rows else "Tu n'as pas encore de notes."
+        elif k in ('call', 'sms'):
+            c, msg = contact_number(a['name'])
+            if not c:
+                return msg
+            num = c[1].replace(' ', '')
+            if k == 'call':
+                view('tel:' + urllib.parse.quote(num))
+                return "J'ouvre l'appel vers %s : appuie sur le bouton vert." % c[0]
+            i = Intent(Intent.ACTION_SENDTO, Uri.parse('smsto:' + urllib.parse.quote(num)))
+            i.putExtra('sms_body', a.get('text', ''))
+            ctx_.startActivity(i)
+            return "Le message pour %s est prêt : appuie sur envoyer." % c[0]
+        return "C'est fait : %s." % a['label'] if k in ('alarm', 'timer', 'torch') else 'Voilà.'
+    except Exception as e:
+        brain.log('action ' + repr(e))
+        return "Je n'ai pas réussi à le faire sur le téléphone."
+
+
+def looks_action(text):
+    rt = route(text)
+    if rt:
+        return rt['intent'] == 'action_telephone' and rt['score'] >= 0.42
+    return len(text.split()) <= 14 and bool(ACTV.search(text))
+
+
+def act_flow(gid, text, dt, voice, lang):
+    pend = PENDING['act'] and time.time() - PENDING['ts'] < 90
+    a, PENDING['act'] = PENDING['act'], None
+    if pend and YES.search(text):
+        return finish_direct(gid, do_action(a), voice, lang) or True
+    if pend and NO.search(text):
+        return finish_direct(gid, "D'accord, j'annule.", voice, lang) or True
+    a = parse_action(text, dt)
+    if not a and looks_action(text):
+        try:
+            a = act_from_json(llm_action(text, dt), dt, text)
+        except Exception as e:
+            brain.log('llm_action ' + repr(e))
+            a = None
+    if not a:
+        return False
+    if a['kind'] == 'say':
+        finish_direct(gid, a['msg'], voice, lang)
+    elif a.get('confirm'):
+        PENDING.update(act=a, ts=time.time())
+        GEN['act'] = '1'
+        finish_direct(gid, a.get('ask') or 'Je mets %s. Tu confirmes ?' % a['label'], voice, lang)
     else:
         finish_direct(gid, do_action(a), voice, lang)
     return True
@@ -1378,7 +1633,7 @@ def warmup():
     try:
         msgs = build_messages('Bonjour', 'FR', 1, '', '', False, datetime.datetime.now())
         msgs[-1] = {'role': 'user', 'content': '.'}
-        body = json.dumps({'messages': msgs, 'max_tokens': 1, 'stream': False, 'cache_prompt': True}).encode()
+        body = json.dumps({'messages': msgs, 'max_tokens': 1, 'stream': False, 'cache_prompt': True, 'id_slot': 0}).encode()
         req = urllib.request.Request(GENERAL + '/v1/chat/completions', data=body,
                                      headers={'Content-Type': 'application/json'})
         urllib.request.urlopen(req, timeout=300).read()
@@ -1393,5 +1648,7 @@ if not os.environ.get('JULIA_NOSERVER'):
     import brain
     threading.Thread(target=brain.ensure, daemon=True).start()
     threading.Thread(target=router_init, daemon=True).start()
+    threading.Thread(target=act_warm, daemon=True).start()
+    threading.Thread(target=appvec_init, daemon=True).start()
     threading.Thread(target=warmup, daemon=True).start()
     ThreadingHTTPServer(('127.0.0.1', 5000), H).serve_forever()
