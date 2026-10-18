@@ -47,7 +47,7 @@ html,body{margin:0;height:100%;background:#070403;color:#f3e3c3;font-family:syst
 <div id="top"><div><div id="ttl" style="font-size:24px;font-weight:700;letter-spacing:.05em;color:#f5b21f">J.U.L.I.A</div><span id="chip" style="display:inline-block;margin-top:6px;font-size:12px;padding:3px 10px;border-radius:10px;border:0.5px solid #f0a830;color:#f0a830">En veille</span></div>
 <button id="gear" class="b" aria-label="Paramètres" style="position:absolute;right:20px;top:calc(env(safe-area-inset-top,0px) + 14px);padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
 <button id="hbtn" class="b" aria-label="Historique" style="position:absolute;left:20px;top:calc(env(safe-area-inset-top,0px) + 14px);padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
-<div class="side" style="left:20px">Modèle<br><i id="bd" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#888;margin-right:6px"></i><span id="mdl">Qwen3 1.7B</span><br>Mémoire<br><span id="cnt">0 souvenir</span></div>
+<div class="side" style="left:20px">Modèle<br><i id="bd" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#888;margin-right:6px"></i><span id="mdl">Qwen3 1.7B</span><br>Mémoire<br><span id="cnt">0 souvenir</span><br>RAM<br><span id="ram">-</span><br><span id="jm" style="opacity:.75"></span><br>Température<br><span id="tmp">-</span></div>
 <div class="side" style="right:20px;text-align:right">Langue<br><span id="lg">Français</span></div>
 <div id="bot">
 <div style="text-align:center;min-height:78px;max-height:26vh;overflow-y:auto;margin-bottom:6px">
@@ -271,6 +271,9 @@ else if(st==="ready"){if(!done){done=1;bar.style.display="block";msg.textContent
 }).catch(function(){bd.style.background="#e26a6a"});
 }
 setInterval(tick,2000);tick();
+function fg(x){return (x/1024).toFixed(1).replace('.',',')}
+function sys(){fetch('/api/sys').then(function(r){return r.json()}).then(function(d){document.getElementById('ram').textContent=fg(d.ram_avail)+' / '+fg(d.ram_total)+' Go libres';document.getElementById('jm').textContent='Julia '+fg(d.julia)+' Go';document.getElementById('tmp').textContent=(d.temp!=null?Math.round(d.temp)+' °C':'-')+(d.thermal?' · '+d.thermal:'')}).catch(function(){})}
+setInterval(sys,4000);sys();
 })();
 </script>
 </body></html>
