@@ -958,7 +958,7 @@ ACT_SCHEMA = {'type': 'object', 'properties': dict([('action', {'enum': ACT_NAME
                                                   + [(k, {'type': 'string'}) for k in ('name', 'dest', 'q', 'text', 'app')]), 'required': ['action']}
 ACTV = re.compile(r"^\W*(?:peux-tu |tu peux |pourrais-tu |s'il te plaît |stp )?(allume|éteins|éteint|coupe|ouvre|ouvrir|lance|lancer|mets|mettre|réveille|appelle|envoie|écris|note|prends|"
                   r"cherche|emmène|lis|joue|démarre|active|désactive|programme|règle|préviens|passe)\b", re.I)
-APPV, APPCACHE = {}, {'ts': 0, 'apps': []}
+APPV, APPCACHE, ACT_OF = {}, {'ts': 0, 'apps': []}, {}
 
 
 def llm_action(text, dt):
@@ -1024,6 +1024,7 @@ def installed_apps():
         pkg = ri.activityInfo.packageName
         if pkg not in seen:
             seen.add(pkg)
+            ACT_OF[pkg] = ri.activityInfo.name
             out.append((ri.loadLabel(pm).toString(), pkg))
     APPCACHE.update(ts=time.time(), apps=out)
     return out
@@ -1140,13 +1141,14 @@ def do_action(a):
                 brain.log('apps ' + repr(e))
                 apps = []
             best, sugg = match_app(a['name'], apps) if apps else (None, [])
-            if best:
-                launch(best[1])
-                return "Voilà, j'ouvre %s." % best[0]
-            pkg = KNOWN.get(fold(a['name']))
+            pkg, shown = (best[1], best[0]) if best else (KNOWN.get(fold(a['name'])), a['name'])
             if pkg:
-                launch(pkg)
-                return "Voilà, j'ouvre %s." % a['name']
+                try:
+                    launch(pkg)
+                    return "Voilà, j'ouvre %s." % shown
+                except Exception as e:
+                    brain.log('launch ' + repr(e))
+                    return app_diag(pkg)
             return ("Je n'ai pas trouvé « %s ». Tu veux dire %s ?" % (a['name'], ' ou '.join(sugg))) if sugg else "Je n'ai pas trouvé l'application %s." % a['name']
         elif k == 'note':
             sql('CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, ts REAL, text TEXT)')
@@ -1180,7 +1182,7 @@ def do_action(a):
         return "C'est fait : %s." % a['label'] if k in ('alarm', 'timer', 'torch') else 'Voilà.'
     except Exception as e:
         brain.log('action ' + repr(e))
-        return "Je n'ai pas réussi : %s" % (type(e).__name__ + ' ' + str(e))[:140]
+        return "Je n'ai pas réussi : %s" % (type(e).__name__ + ' ' + str(e))[:260]
 
 
 KNOWN = {'whatsapp': 'com.whatsapp', 'instagram': 'com.instagram.android', 'youtube': 'com.google.android.youtube', 'spotify': 'com.spotify.music',
@@ -1195,9 +1197,21 @@ def launch(pkg):
     Intent = autoclass('android.content.Intent')
     i = Intent(Intent.ACTION_MAIN)
     i.addCategory(Intent.CATEGORY_LAUNCHER)
-    i.setPackage(pkg)
     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if pkg in ACT_OF:
+        i.setClassName(pkg, ACT_OF[pkg])
+    else:
+        i.setPackage(pkg)
     droid().startActivity(i)
+
+
+def app_diag(pkg):
+    try:
+        perm = droid().checkSelfPermission('android.permission.QUERY_ALL_PACKAGES') == 0
+    except Exception:
+        perm = False
+    return "Je n'ai pas pu ouvrir %s (paquet %s, applis visibles : %d, autorisation de voir les applis : %s)." % (
+        pkg.split('.')[-1], pkg, len(APPCACHE['apps']), 'oui' if perm else 'non')
 
 
 def sys_info():
