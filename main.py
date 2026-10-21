@@ -1018,15 +1018,19 @@ def installed_apps():
     i = Intent(Intent.ACTION_MAIN)
     i.addCategory(Intent.CATEGORY_LAUNCHER)
     lst = pm.queryIntentActivities(i, 0)
-    seen, out = set(), []
+    seen, out, err = set(), [], ''
     for k in range(lst.size()):
-        ri = lst.get(k)
-        pkg = ri.activityInfo.packageName
-        if pkg not in seen:
+        try:
+            ri = lst.get(k)
+            pkg = str(ri.activityInfo.packageName)
+            if pkg in seen:
+                continue
             seen.add(pkg)
-            ACT_OF[pkg] = ri.activityInfo.name
-            out.append((ri.loadLabel(pm).toString(), pkg))
-    APPCACHE.update(ts=time.time(), apps=out)
+            ACT_OF[pkg] = str(ri.activityInfo.name)
+            out.append((str(ri.loadLabel(pm)), pkg))
+        except Exception as e:
+            err = type(e).__name__ + ' ' + str(e)[:80]
+    APPCACHE.update(ts=time.time(), apps=out, err=err, raw=lst.size())
     return out
 
 
@@ -1139,7 +1143,16 @@ def do_action(a):
                 apps = installed_apps()
             except Exception as e:
                 brain.log('apps ' + repr(e))
+                APPCACHE['err'] = type(e).__name__ + ' ' + str(e)[:80]
                 apps = []
+            if not apps and not has_perm('com.android.permission.GET_INSTALLED_APPS'):
+                try:
+                    from android.permissions import request_permissions
+                    request_permissions(['com.android.permission.GET_INSTALLED_APPS'])
+                    if APPCACHE.get('raw', 0) == 0:
+                        return "J'ai besoin de la liste de tes applis : accepte la demande d'autorisation du téléphone, puis redis-moi la commande."
+                except Exception as e:
+                    brain.log('perm apps ' + repr(e))
             best, sugg = match_app(a['name'], apps) if apps else (None, [])
             pkg, shown = (best[1], best[0]) if best else (KNOWN.get(fold(a['name'])), a['name'])
             if pkg:
@@ -1205,13 +1218,17 @@ def launch(pkg):
     droid().startActivity(i)
 
 
-def app_diag(pkg):
+def has_perm(p):
     try:
-        perm = droid().checkSelfPermission('android.permission.QUERY_ALL_PACKAGES') == 0
+        return droid().checkSelfPermission(p) == 0
     except Exception:
-        perm = False
-    return "Je n'ai pas pu ouvrir %s (paquet %s, applis visibles : %d, autorisation de voir les applis : %s)." % (
-        pkg.split('.')[-1], pkg, len(APPCACHE['apps']), 'oui' if perm else 'non')
+        return False
+
+
+def app_diag(pkg):
+    return ("Je n'ai pas pu ouvrir %s. Le système a renvoyé %s applis, j'en ai lu %d (erreur : %s). Autorisation de voir les applis : %s, liste d'applis Xiaomi : %s." % (
+        pkg, APPCACHE.get('raw', '?'), len(APPCACHE['apps']), APPCACHE.get('err') or 'aucune',
+        'oui' if has_perm('android.permission.QUERY_ALL_PACKAGES') else 'non', 'oui' if has_perm('com.android.permission.GET_INSTALLED_APPS') else 'non'))
 
 
 def sys_info():
