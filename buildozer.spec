@@ -9,7 +9,7 @@ version = 0.1
 requirements = python3,plyer,pyjnius,android,sqlite3,certifi
 orientation = portrait
 fullscreen = 1
-android.permissions = INTERNET,RECORD_AUDIO,com.android.alarm.permission.SET_ALARM,QUERY_ALL_PACKAGES,READ_CONTACTS,com.android.permission.GET_INSTALLED_APPS
+android.permissions = INTERNET,RECORD_AUDIO,com.android.alarm.permission.SET_ALARM,QUERY_ALL_PACKAGES,READ_CONTACTS,com.android.permission.GET_INSTALLED_APPS,FOREGROUND_SERVICE,POST_NOTIFICATIONS
 android.api = 33
 android.minapi = 24
 android.archs = arm64-v8a
@@ -17,6 +17,8 @@ android.add_libs_arm64_v8a = libs/arm64-v8a/*.so
 android.accept_sdk_license = True
 p4a.bootstrap = webview
 p4a.port = 5000
+
+services = julia:service.py:foreground:sticky
 
 [buildozer]
 log_level = 2

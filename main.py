@@ -1268,6 +1268,39 @@ def sys_info():
     return out
 
 
+# ---------- service Android au premier plan (étape A) ----------
+SVC = {'err': '', 'started': 0}
+
+
+def start_service():
+    try:
+        try:
+            from android.permissions import request_permissions
+            request_permissions(['android.permission.POST_NOTIFICATIONS'])
+            time.sleep(2)
+        except Exception as e:
+            brain.log('notif perm ' + repr(e))
+        from android import AndroidService
+        svc = AndroidService('Julia', 'Julia reste active en arrière-plan')
+        svc.start('julia')
+        SVC['started'] = time.time()
+    except Exception as e:
+        SVC['err'] = type(e).__name__ + ' ' + str(e)[:100]
+        brain.log('service ' + repr(e))
+
+
+def svc_info():
+    out = {'alive': False, 'age': None, 'uptime': 0, 'err': SVC['err']}
+    try:
+        d = json.load(open(os.path.join(DATA, 'service_hb.json')))
+        out['age'] = round(time.time() - d['t'])
+        out['alive'] = out['age'] < 20
+        out['uptime'] = round(d['t'] - d['since'])
+    except Exception:
+        pass
+    return out
+
+
 def looks_action(text):
     rt = route(text)
     if rt:
@@ -1609,6 +1642,8 @@ class H(SimpleHTTPRequestHandler):
             return self._json({'voices': native_voices(q.get('lang', ['FR'])[0]), 'native': NT['ready']})
         if u.path == '/api/memory':
             return self._json(memory_info())
+        if u.path == '/api/svc':
+            return self._json(svc_info())
         if u.path == '/api/sys':
             return self._json(sys_info())
         if u.path == '/api/brain':
@@ -1682,6 +1717,7 @@ if not os.environ.get('JULIA_NOSERVER'):
     threading.Thread(target=brain.ensure, daemon=True).start()
     threading.Thread(target=router_init, daemon=True).start()
     threading.Thread(target=act_warm, daemon=True).start()
+    threading.Thread(target=start_service, daemon=True).start()
     threading.Thread(target=appvec_init, daemon=True).start()
     threading.Thread(target=warmup, daemon=True).start()
     ThreadingHTTPServer(('127.0.0.1', 5000), H).serve_forever()
