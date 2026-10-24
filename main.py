@@ -1294,12 +1294,17 @@ def start_service():
 
 
 def svc_info():
+    def rd(name):
+        try:
+            return open(os.path.join(DATA, name)).read().strip()
+        except Exception:
+            return ''
     age = None
     try:
-        age = round(time.time() - int(open(os.path.join(DATA, 'service_hb.txt')).read().split()[0]))
+        age = round(time.time() - int(rd('service_hb.txt').split()[0]))
     except Exception:
         pass
-    return {'ok': SVC['ok'], 'err': SVC['err'], 'step': SVC['step'], 'age': age}
+    return {'ok': SVC['ok'], 'err': SVC['err'], 'step': SVC['step'], 'age': age, 'boot': rd('service_boot.txt')[:60], 'serr': rd('service_err.txt')[-90:]}
 
 
 def looks_action(text):
