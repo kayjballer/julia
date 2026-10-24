@@ -1268,37 +1268,38 @@ def sys_info():
     return out
 
 
-# ---------- service Android au premier plan (étape A) ----------
-SVC = {'err': '', 'started': 0}
+SVC = {'ok': False, 'err': '', 'step': 'non lancé'}
+
+
+def ask_notif():
+    try:
+        from android.permissions import request_permissions
+        request_permissions(['android.permission.POST_NOTIFICATIONS'])
+    except Exception as e:
+        brain.log('notif ' + repr(e))
 
 
 def start_service():
+    SVC['step'] = 'démarrage du fil'
     try:
-        try:
-            from android.permissions import request_permissions
-            request_permissions(['android.permission.POST_NOTIFICATIONS'])
-            time.sleep(2)
-        except Exception as e:
-            brain.log('notif perm ' + repr(e))
+        SVC['step'] = 'import AndroidService'
         from android import AndroidService
-        svc = AndroidService('Julia', 'Julia reste active en arrière-plan')
-        svc.start('julia')
-        SVC['started'] = time.time()
+        SVC['step'] = 'lancement du service'
+        AndroidService('Julia', 'Julia reste active en arrière-plan').start('julia')
+        SVC['ok'], SVC['step'] = True, 'lancé'
     except Exception as e:
-        SVC['err'] = type(e).__name__ + ' ' + str(e)[:100]
+        SVC['err'] = (type(e).__name__ + ' ' + str(e))[:90]
         brain.log('service ' + repr(e))
+    threading.Thread(target=ask_notif, daemon=True).start()
 
 
 def svc_info():
-    out = {'alive': False, 'age': None, 'uptime': 0, 'err': SVC['err']}
+    age = None
     try:
-        d = json.load(open(os.path.join(DATA, 'service_hb.json')))
-        out['age'] = round(time.time() - d['t'])
-        out['alive'] = out['age'] < 20
-        out['uptime'] = round(d['t'] - d['since'])
+        age = round(time.time() - int(open(os.path.join(DATA, 'service_hb.txt')).read().split()[0]))
     except Exception:
         pass
-    return out
+    return {'ok': SVC['ok'], 'err': SVC['err'], 'step': SVC['step'], 'age': age}
 
 
 def looks_action(text):
@@ -1642,10 +1643,8 @@ class H(SimpleHTTPRequestHandler):
             return self._json({'voices': native_voices(q.get('lang', ['FR'])[0]), 'native': NT['ready']})
         if u.path == '/api/memory':
             return self._json(memory_info())
-        if u.path == '/api/svc':
-            return self._json(svc_info())
         if u.path == '/api/sys':
-            return self._json(sys_info())
+            return self._json(dict(sys_info(), svc=svc_info()))
         if u.path == '/api/brain':
             try:
                 import brain
@@ -1714,10 +1713,10 @@ if ANDROID:
 
 if not os.environ.get('JULIA_NOSERVER'):
     import brain
+    threading.Thread(target=start_service, daemon=True).start()
     threading.Thread(target=brain.ensure, daemon=True).start()
     threading.Thread(target=router_init, daemon=True).start()
     threading.Thread(target=act_warm, daemon=True).start()
-    threading.Thread(target=start_service, daemon=True).start()
     threading.Thread(target=appvec_init, daemon=True).start()
     threading.Thread(target=warmup, daemon=True).start()
     ThreadingHTTPServer(('127.0.0.1', 5000), H).serve_forever()

@@ -272,9 +272,8 @@ else if(st==="ready"){if(!done){done=1;bar.style.display="block";msg.textContent
 }
 setInterval(tick,2000);tick();
 function fg(x){return (x/1024).toFixed(1).replace('.',',')}
-function sys(){fetch('/api/sys').then(function(r){return r.json()}).then(function(d){document.getElementById('ram').textContent=fg(d.ram_avail)+' / '+fg(d.ram_total)+' Go libres';document.getElementById('jm').textContent='Julia '+fg(d.julia)+' Go';document.getElementById('tmp').textContent=(d.temp!=null?Math.round(d.temp)+' °C':'-')+(d.thermal?' · '+d.thermal:'')}).catch(function(){})}
-function svc(){fetch('/api/svc').then(function(r){return r.json()}).then(function(d){var m=Math.round(d.uptime/60);document.getElementById('svc').textContent=d.alive?('actif · '+(m>=60?Math.floor(m/60)+' h '+(m%60)+' min':m+' min')):(d.err?'erreur : '+d.err:'arrêté')}).catch(function(){})}
-setInterval(sys,4000);sys();setInterval(svc,5000);svc();
+function sys(){fetch('/api/sys').then(function(r){return r.json()}).then(function(d){var v=d.svc||{};document.getElementById('svc').textContent=(v.age!=null&&v.age<20)?'actif':(v.err?'erreur : '+v.err:(v.ok?'démarrage…':(v.step||'arrêté')));document.getElementById('ram').textContent=fg(d.ram_avail)+' / '+fg(d.ram_total)+' Go libres';document.getElementById('jm').textContent='Julia '+fg(d.julia)+' Go';document.getElementById('tmp').textContent=(d.temp!=null?Math.round(d.temp)+' °C':'-')+(d.thermal?' · '+d.thermal:'')}).catch(function(){})}
+setInterval(sys,4000);sys();
 })();
 </script>
 </body></html>
