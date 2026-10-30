@@ -962,7 +962,7 @@ APPV, APPCACHE, ACT_OF = {}, {'ts': 0, 'apps': []}, {}
 
 
 def llm_action(text, dt):
-    prompt = ACT_SYS + 'Heure : %02d:%02d. Demande : %s<|im_end|>\n<|im_start|>assistant\n' % (dt.hour, dt.minute, text[:200])
+    prompt = ACT_SYS + 'Heure : %02d:%02d. Demande : %s<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n' % (dt.hour, dt.minute, text[:200])
     body = json.dumps({'prompt': prompt, 'json_schema': ACT_SCHEMA, 'n_predict': 70, 'temperature': 0, 'cache_prompt': True, 'id_slot': 1}).encode()
     r = json.loads(urllib.request.urlopen(urllib.request.Request(GENERAL + '/completion', body, {'Content-Type': 'application/json'}), timeout=90).read())
     return json.loads(r.get('content') or '{}')
