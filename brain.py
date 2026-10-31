@@ -36,7 +36,7 @@ def binary():
         return p
     try:
         from jnius import autoclass
-        act = autoclass('org.kivy.android.PythonActivity').mActivity
+        act = autoclass('org.kivy.android.PythonActivity').mActivity or autoclass('org.kivy.android.PythonService').mService
         d = act.getApplicationInfo().nativeLibraryDir
         p = os.path.join(d, 'libllama_server.so')
         log('nativeLibraryDir=' + d + ' contenu=' + str(os.listdir(d)))
