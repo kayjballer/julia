@@ -17,6 +17,12 @@ except Exception:
     brain = None
     w('service_err.txt', 'import brain: ' + traceback.format_exc())
 
+try:
+    import overlay
+    threading.Thread(target=overlay.run, daemon=True).start()
+except Exception:
+    w('service_err.txt', 'overlay: ' + traceback.format_exc()[-250:])
+
 def port_proc(port):
     # un processus llama_server ecoute-t-il deja sur ce port ?
     tok = b'\x00%d\x00' % port

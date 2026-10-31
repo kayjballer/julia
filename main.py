@@ -1306,6 +1306,16 @@ def start_service():
             Cls = autoclass('java.lang.Class')
             mt = act.getClassLoader().loadClass('org.jacques.julia.ServiceJulia').getMethod('start', Cls.forName('android.content.Context'), Cls.forName('java.lang.String'))
             mt.invoke(None, act, '')
+        try:
+            Settings = autoclass('android.provider.Settings')
+            flag = os.path.join(DATA, 'overlay_asked.txt')
+            if (not Settings.canDrawOverlays(act)) and (not os.path.exists(flag)):
+                open(flag, 'w').write('1')
+                Intent = autoclass('android.content.Intent')
+                Uri = autoclass('android.net.Uri')
+                act.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse('package:' + pkg)))
+        except Exception:
+            pass
         SVC['ok'], SVC['step'] = True, 'lancé'
     except Exception as e:
         SVC['err'] = (SVC['step'] + ' | ' + type(e).__name__ + ' ' + str(e))[:170]
