@@ -1286,14 +1286,19 @@ def start_service():
         from jnius import autoclass
         act = autoclass('org.kivy.android.PythonActivity').mActivity
         SVC['step'] = 'lancement du service'
-        S = autoclass(act.getPackageName() + '.ServiceJulia')
+        pkg = str(act.getPackageName())
+        SVC['step'] = 'classe ' + pkg
+        try:
+            S = autoclass(pkg + '.ServiceJulia')
+        except Exception:
+            S = autoclass('org.jacques.julia.ServiceJulia')
         try:
             S.start(act, '')
         except Exception:
             S.start(act, 'icon', 'Julia', 'Julia reste active en arrière-plan', '')
         SVC['ok'], SVC['step'] = True, 'lancé'
     except Exception as e:
-        SVC['err'] = (type(e).__name__ + ' ' + str(e))[:90]
+        SVC['err'] = (SVC['step'] + ' | ' + type(e).__name__ + ' ' + str(e))[:170]
         brain.log('service ' + repr(e))
     threading.Thread(target=ask_notif, daemon=True).start()
 
