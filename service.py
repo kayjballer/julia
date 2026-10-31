@@ -11,6 +11,25 @@ def w(name, txt):
         pass
 
 w('service_boot.txt', 'demarre pid=%d t=%d' % (os.getpid(), int(time.time())))
+# Charger les classes de l'appli dans le fil principal du service (les fils Python ne les voient pas)
+try:
+    from jnius import autoclass as _ac
+    for _c in ('org.kivy.android.PythonService', 'org.kivy.android.PythonActivity', 'android.provider.Settings',
+               'android.os.Handler', 'android.os.Looper', 'android.webkit.WebView',
+               'android.view.WindowManager$LayoutParams', 'android.app.ActivityManager$RunningAppProcessInfo'):
+        try:
+            _ac(_c)
+        except Exception:
+            pass
+except Exception:
+    pass
+try:
+    _p = open(os.path.join(DATA, 'llama_bin.txt')).read().strip()
+    if _p and os.path.exists(_p):
+        os.environ['JULIA_LLAMA_BIN'] = _p
+except Exception:
+    pass
+
 try:
     import brain
 except Exception:

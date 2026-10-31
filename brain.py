@@ -41,6 +41,10 @@ def binary():
         p = os.path.join(d, 'libllama_server.so')
         log('nativeLibraryDir=' + d + ' contenu=' + str(os.listdir(d)))
         if os.path.exists(p):
+            try:
+                open(os.path.join(DATA, 'llama_bin.txt'), 'w').write(p)
+            except Exception:
+                pass
             return p
     except Exception as e:
         log('jnius: ' + repr(e))
@@ -202,7 +206,7 @@ def ensure():
         m = get_model()
         ST['stage'] = 'start'
         if os.environ.get('JULIA_SVC') != '1' and wait_service():
-            for _ in range(120):
+            for _ in range(60):
                 if alive():
                     ST['stage'] = 'ready'
                     start_emb()
