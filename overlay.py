@@ -53,6 +53,10 @@ def _run():
     Handler = autoclass('android.os.Handler')
     Looper = autoclass('android.os.Looper')
     WebView = autoclass('android.webkit.WebView')
+    try:
+        WebView.setDataDirectorySuffix('julia_svc')
+    except Exception:
+        pass
     LP = autoclass('android.view.WindowManager$LayoutParams')
     pkg = str(ctx.getPackageName())
     wm = ctx.getSystemService('window')
