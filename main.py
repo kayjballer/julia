@@ -1283,9 +1283,14 @@ def start_service():
     SVC['step'] = 'démarrage du fil'
     try:
         SVC['step'] = 'import AndroidService'
-        from android import AndroidService
+        from jnius import autoclass
+        act = autoclass('org.kivy.android.PythonActivity').mActivity
         SVC['step'] = 'lancement du service'
-        AndroidService('Julia', 'Julia reste active en arrière-plan').start('julia')
+        S = autoclass(act.getPackageName() + '.ServiceJulia')
+        try:
+            S.start(act, '')
+        except Exception:
+            S.start(act, 'icon', 'Julia', 'Julia reste active en arrière-plan', '')
         SVC['ok'], SVC['step'] = True, 'lancé'
     except Exception as e:
         SVC['err'] = (type(e).__name__ + ' ' + str(e))[:90]
