@@ -1279,6 +1279,13 @@ def ask_notif():
         brain.log('notif ' + repr(e))
 
 
+_SVC_CLS = None
+try:
+    from jnius import autoclass as _ac
+    _SVC_CLS = _ac('org.jacques.julia.ServiceJulia')
+except Exception:
+    pass
+
 def start_service():
     SVC['step'] = 'démarrage du fil'
     try:
@@ -1289,13 +1296,16 @@ def start_service():
         pkg = str(act.getPackageName())
         SVC['step'] = 'classe ' + pkg
         try:
-            S = autoclass(pkg + '.ServiceJulia')
+            S = _SVC_CLS or autoclass('org.jacques.julia.ServiceJulia')
+            try:
+                S.start(act, '')
+            except Exception:
+                S.start(act, 'icon', 'Julia', 'Julia reste active en arrière-plan', '')
         except Exception:
-            S = autoclass('org.jacques.julia.ServiceJulia')
-        try:
-            S.start(act, '')
-        except Exception:
-            S.start(act, 'icon', 'Julia', 'Julia reste active en arrière-plan', '')
+            SVC['step'] = 'chargeur de classes'
+            Cls = autoclass('java.lang.Class')
+            mt = act.getClassLoader().loadClass('org.jacques.julia.ServiceJulia').getMethod('start', Cls.forName('android.content.Context'), Cls.forName('java.lang.String'))
+            mt.invoke(None, act, '')
         SVC['ok'], SVC['step'] = True, 'lancé'
     except Exception as e:
         SVC['err'] = (SVC['step'] + ' | ' + type(e).__name__ + ' ' + str(e))[:170]
