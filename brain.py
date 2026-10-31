@@ -141,7 +141,25 @@ def emb_model():
     return EMB_MODEL
 
 
+def svc_fresh():
+    try:
+        t = int(open(os.path.join(DATA, 'service_hb.txt')).read().split()[0])
+        return time.time() - t < 20
+    except Exception:
+        return False
+
+
+def wait_service():
+    for _ in range(15):
+        if svc_fresh():
+            return True
+        time.sleep(1)
+    return False
+
+
 def ensure_emb():
+    if os.environ.get('JULIA_SVC') != '1' and svc_fresh():
+        return
     try:
         if emb_alive():
             EMB['stage'] = 'ready'
@@ -183,6 +201,13 @@ def ensure():
         ST['stage'] = 'download'
         m = get_model()
         ST['stage'] = 'start'
+        if os.environ.get('JULIA_SVC') != '1' and wait_service():
+            for _ in range(120):
+                if alive():
+                    ST['stage'] = 'ready'
+                    start_emb()
+                    return
+                time.sleep(1)
         out = open(LOG, 'ab')
         subprocess.Popen([b, '-m', m, '-t', '4', '-c', '4096', '-np', '2', '-fa', 'on', '-lm', 'none', '--chat-template-kwargs', '{"enable_thinking": false}',
                           '--host', '127.0.0.1', '--port', str(PORT)],

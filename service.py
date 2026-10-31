@@ -1,6 +1,6 @@
-# Service Julia : battement de coeur + gardien des serveurs du modele
+# Service Julia : battement de coeur, gardien du modele, popup flottant
 import os, time, traceback, threading
-
+os.environ['JULIA_SVC'] = '1'
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
 
 def w(name, txt):
@@ -15,16 +15,15 @@ try:
     import brain
 except Exception:
     brain = None
-    w('service_err.txt', 'import brain: ' + traceback.format_exc())
-
+    w('service_err.txt', 'import brain: ' + traceback.format_exc()[-250:])
+OV = None
 try:
-    import overlay
-    threading.Thread(target=overlay.run, daemon=True).start()
+    import overlay as OV
+    threading.Thread(target=OV.run, daemon=True).start()
 except Exception:
     w('service_err.txt', 'overlay: ' + traceback.format_exc()[-250:])
 
-def port_proc(port):
-    # un processus llama_server ecoute-t-il deja sur ce port ?
+def llama_pid(port):
     tok = b'\x00%d\x00' % port
     try:
         for p in os.listdir('/proc'):
@@ -35,10 +34,16 @@ def port_proc(port):
             except Exception:
                 continue
             if b'llama_server' in c and tok in c + b'\x00':
-                return True
+                return int(p)
     except Exception:
         pass
-    return False
+    return 0
+
+def ppid(pid):
+    try:
+        return int(open('/proc/%d/stat' % pid).read().rsplit(')', 1)[1].split()[1])
+    except Exception:
+        return 0
 
 def model_ready():
     try:
@@ -46,25 +51,41 @@ def model_ready():
     except Exception:
         return False
 
-miss_llm = miss_emb = 0
+th = th2 = None
+miss_emb = 0
 last_llm = last_emb = 0
 while True:
     try:
         w('service_hb.txt', '%d %d' % (int(time.time()), os.getpid()))
-        if brain and model_ready():
+        cerv = 'init'
+        if brain is None:
+            cerv = 'brain absent'
+        elif not model_ready():
+            cerv = 'attend le modele'
+        else:
             now = time.time()
-            down = (not port_proc(8080)) and (not brain.alive())
-            miss_llm = miss_llm + 1 if down else 0
-            if miss_llm >= 2 and now - last_llm > 60:
+            pid = llama_pid(8080)
+            up = bool(pid) or brain.alive()
+            if up:
+                cerv = 'actif (service)' if (pid and ppid(pid) == os.getpid()) else 'actif (appli)'
+            elif (th is None or not th.is_alive()) and now - last_llm > 45:
                 last_llm = now
-                w('service_srv.txt', 'relance modele %d' % int(now))
-                threading.Thread(target=brain.ensure, daemon=True).start()
-            if (not down) and os.path.exists(brain.EMB_MODEL):
-                edown = (not port_proc(8082)) and (not brain.emb_alive())
+                th = threading.Thread(target=brain.ensure, daemon=True)
+                th.start()
+                cerv = 'lancement'
+            else:
+                cerv = 'demarrage'
+            if brain.ST.get('stage') == 'error':
+                cerv += ' [' + str(brain.ST.get('err'))[:80] + ']'
+            if up and os.path.exists(brain.EMB_MODEL):
+                edown = (not llama_pid(8082)) and (not brain.emb_alive())
                 miss_emb = miss_emb + 1 if edown else 0
-                if miss_emb >= 2 and now - last_emb > 60:
+                if miss_emb >= 2 and (th2 is None or not th2.is_alive()) and now - last_emb > 60:
                     last_emb = now
-                    threading.Thread(target=brain.start_emb, daemon=True).start()
+                    th2 = threading.Thread(target=brain.start_emb, daemon=True)
+                    th2.start()
+        pop = OV.STATE['s'] if (OV is not None and hasattr(OV, 'STATE')) else 'absent'
+        w('service_info.txt', 'cerveau: %s | popup: %s' % (cerv, pop))
     except Exception:
         w('service_err.txt', traceback.format_exc()[-300:])
     time.sleep(5)

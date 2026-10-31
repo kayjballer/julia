@@ -1334,7 +1334,7 @@ def svc_info():
         age = round(time.time() - int(rd('service_hb.txt').split()[0]))
     except Exception:
         pass
-    return {'ok': SVC['ok'], 'err': SVC['err'], 'step': SVC['step'], 'age': age, 'boot': rd('service_boot.txt')[:60], 'serr': rd('service_err.txt')[-90:]}
+    return {'ok': SVC['ok'], 'err': SVC['err'], 'step': SVC['step'], 'age': age, 'boot': rd('service_boot.txt')[:60], 'serr': rd('service_err.txt')[-90:], 'info': rd('service_info.txt')[:140]}
 
 
 def looks_action(text):

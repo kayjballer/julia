@@ -2,6 +2,7 @@
 import os, time, traceback
 
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
+STATE = {'s': 'init'}
 
 HTML = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <body style="margin:0;background:transparent;overflow:hidden">
@@ -31,6 +32,7 @@ def run():
     try:
         _run()
     except Exception:
+        STATE['s'] = 'erreur init: ' + traceback.format_exc().strip().splitlines()[-1][:90]
         err('overlay: ' + traceback.format_exc())
 
 def _run():
@@ -59,6 +61,7 @@ def _run():
             try:
                 self.fn()
             except Exception:
+                STATE['s'] = 'erreur ui: ' + traceback.format_exc().strip().splitlines()[-1][:90]
                 err('overlay ui: ' + traceback.format_exc())
 
     def ui(fn):
@@ -144,11 +147,21 @@ def _run():
 
     while True:
         try:
-            want = bool(Settings.canDrawOverlays(ctx)) and not app_fg()
+            perm = bool(Settings.canDrawOverlays(ctx))
+            fg = app_fg()
+            want = perm and not fg
             if want and st['wv'] is None:
+                STATE['s'] = 'creation'
                 ui(show)
             elif (not want) and st['wv'] is not None:
                 ui(hide)
+            if not perm:
+                STATE['s'] = 'permission manquante'
+            elif fg:
+                STATE['s'] = 'masque (appli visible)'
+            elif st['wv'] is not None:
+                STATE['s'] = 'affiche'
         except Exception:
+            STATE['s'] = 'erreur boucle: ' + traceback.format_exc().strip().splitlines()[-1][:90]
             err('overlay boucle: ' + traceback.format_exc())
         time.sleep(2)
