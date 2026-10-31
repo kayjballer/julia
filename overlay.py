@@ -3,6 +3,17 @@ import os, time, traceback
 
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
 STATE = {'s': 'init'}
+import sys
+
+def _why():
+    e = sys.exc_info()
+    t, ln = e[2], 0
+    while t is not None:
+        if t.tb_frame.f_code.co_filename.endswith('overlay.py'):
+            ln = t.tb_lineno
+        t = t.tb_next
+    return 'L%d %s' % (ln, str(e[1])[:110])
+
 
 HTML = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <body style="margin:0;background:transparent;overflow:hidden">
@@ -32,7 +43,7 @@ def run():
     try:
         _run()
     except Exception:
-        STATE['s'] = 'erreur init: ' + traceback.format_exc().strip().splitlines()[-1][:90]
+        STATE['s'] = 'erreur init: ' + _why()
         err('overlay: ' + traceback.format_exc())
 
 def _run():
@@ -61,7 +72,7 @@ def _run():
             try:
                 self.fn()
             except Exception:
-                STATE['s'] = 'erreur ui: ' + traceback.format_exc().strip().splitlines()[-1][:90]
+                STATE['s'] = 'erreur ui: ' + _why()
                 err('overlay ui: ' + traceback.format_exc())
 
     def ui(fn):
@@ -162,6 +173,6 @@ def _run():
             elif st['wv'] is not None:
                 STATE['s'] = 'affiche'
         except Exception:
-            STATE['s'] = 'erreur boucle: ' + traceback.format_exc().strip().splitlines()[-1][:90]
+            STATE['s'] = 'erreur boucle: ' + _why()
             err('overlay boucle: ' + traceback.format_exc())
         time.sleep(2)

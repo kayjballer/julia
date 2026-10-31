@@ -1,4 +1,4 @@
-# Service Julia : battement de coeur, gardien du modele, popup flottant
+# Service Julia : battement de coeur, gardien du modele, popup flottant (fil principal)
 import os, time, traceback, threading
 os.environ['JULIA_SVC'] = '1'
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
@@ -11,7 +11,6 @@ def w(name, txt):
         pass
 
 w('service_boot.txt', 'demarre pid=%d t=%d' % (os.getpid(), int(time.time())))
-# Charger les classes de l'appli dans le fil principal du service (les fils Python ne les voient pas)
 try:
     from jnius import autoclass as _ac
     for _c in ('org.kivy.android.PythonService', 'org.kivy.android.PythonActivity', 'android.provider.Settings',
@@ -29,17 +28,15 @@ try:
         os.environ['JULIA_LLAMA_BIN'] = _p
 except Exception:
     pass
-
 try:
     import brain
 except Exception:
     brain = None
     w('service_err.txt', 'import brain: ' + traceback.format_exc()[-250:])
-OV = None
 try:
     import overlay as OV
-    threading.Thread(target=OV.run, daemon=True).start()
 except Exception:
+    OV = None
     w('service_err.txt', 'overlay: ' + traceback.format_exc()[-250:])
 
 def llama_pid(port):
@@ -70,41 +67,47 @@ def model_ready():
     except Exception:
         return False
 
-th = th2 = None
-miss_emb = 0
-last_llm = last_emb = 0
-while True:
-    try:
-        w('service_hb.txt', '%d %d' % (int(time.time()), os.getpid()))
-        cerv = 'init'
-        if brain is None:
-            cerv = 'brain absent'
-        elif not model_ready():
-            cerv = 'attend le modele'
-        else:
-            now = time.time()
-            pid = llama_pid(8080)
-            up = bool(pid) or brain.alive()
-            if up:
-                cerv = 'actif (service)' if (pid and ppid(pid) == os.getpid()) else 'actif (appli)'
-            elif (th is None or not th.is_alive()) and now - last_llm > 45:
-                last_llm = now
-                th = threading.Thread(target=brain.ensure, daemon=True)
-                th.start()
-                cerv = 'lancement'
+G = {'th': None, 'th2': None, 'miss_emb': 0, 'last_llm': 0, 'last_emb': 0}
+
+def guard():
+    while True:
+        try:
+            w('service_hb.txt', '%d %d' % (int(time.time()), os.getpid()))
+            cerv = 'init'
+            if brain is None:
+                cerv = 'brain absent'
+            elif not model_ready():
+                cerv = 'attend le modele'
             else:
-                cerv = 'demarrage'
-            if brain.ST.get('stage') == 'error':
-                cerv += ' [' + str(brain.ST.get('err'))[:80] + ']'
-            if up and os.path.exists(brain.EMB_MODEL):
-                edown = (not llama_pid(8082)) and (not brain.emb_alive())
-                miss_emb = miss_emb + 1 if edown else 0
-                if miss_emb >= 2 and (th2 is None or not th2.is_alive()) and now - last_emb > 60:
-                    last_emb = now
-                    th2 = threading.Thread(target=brain.start_emb, daemon=True)
-                    th2.start()
-        pop = OV.STATE['s'] if (OV is not None and hasattr(OV, 'STATE')) else 'absent'
-        w('service_info.txt', 'cerveau: %s | popup: %s' % (cerv, pop))
-    except Exception:
-        w('service_err.txt', traceback.format_exc()[-300:])
-    time.sleep(5)
+                now = time.time()
+                pid = llama_pid(8080)
+                up = bool(pid) or brain.alive()
+                if up:
+                    cerv = 'actif (service)' if (pid and ppid(pid) == os.getpid()) else 'actif (appli)'
+                elif (G['th'] is None or not G['th'].is_alive()) and now - G['last_llm'] > 45:
+                    G['last_llm'] = now
+                    G['th'] = threading.Thread(target=brain.ensure, daemon=True)
+                    G['th'].start()
+                    cerv = 'lancement'
+                else:
+                    cerv = 'demarrage'
+                if brain.ST.get('stage') == 'error':
+                    cerv += ' [' + str(brain.ST.get('err'))[:80] + ']'
+                if up and os.path.exists(brain.EMB_MODEL):
+                    edown = (not llama_pid(8082)) and (not brain.emb_alive())
+                    G['miss_emb'] = G['miss_emb'] + 1 if edown else 0
+                    if G['miss_emb'] >= 2 and (G['th2'] is None or not G['th2'].is_alive()) and now - G['last_emb'] > 60:
+                        G['last_emb'] = now
+                        G['th2'] = threading.Thread(target=brain.start_emb, daemon=True)
+                        G['th2'].start()
+            pop = OV.STATE['s'] if (OV is not None and hasattr(OV, 'STATE')) else 'absent'
+            w('service_info.txt', 'cerveau: %s | popup: %s' % (cerv, pop))
+        except Exception:
+            w('service_err.txt', traceback.format_exc()[-300:])
+        time.sleep(5)
+
+threading.Thread(target=guard, daemon=True).start()
+if OV is not None:
+    OV.run()
+while True:
+    time.sleep(60)
