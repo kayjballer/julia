@@ -1,15 +1,19 @@
-# Service Julia (étape A de l'écoute continue) : pour l'instant, un battement de coeur
-# qui prouve que le service tourne, même quand la fenêtre de l'app est fermée.
-import os, time, json
+# Service Julia : battement de coeur + journal de demarrage et d'erreur
+import os, time, traceback
 
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
-PATH = os.path.join(DATA, 'service_hb.json')
-T0 = time.time()
 
-while True:
+def w(name, txt):
     try:
-        with open(PATH, 'w') as f:
-            json.dump({'t': time.time(), 'since': T0, 'pid': os.getpid()}, f)
+        with open(os.path.join(DATA, name), 'w') as f:
+            f.write(txt)
     except Exception:
         pass
-    time.sleep(5)
+
+w('service_boot.txt', 'demarre pid=%d t=%d' % (os.getpid(), int(time.time())))
+try:
+    while True:
+        w('service_hb.txt', '%d %d' % (int(time.time()), os.getpid()))
+        time.sleep(5)
+except Exception:
+    w('service_err.txt', traceback.format_exc())
