@@ -15,22 +15,23 @@ def _why():
     return 'L%d %s' % (ln, str(e[1])[:110])
 
 
-HTML = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+HTML_T = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <body style="margin:0;background:transparent;overflow:hidden">
-<div style="width:100vw;height:100vh;background:#000;border-radius:22px;border:1px solid #3a2f12;box-sizing:border-box">
-<svg viewBox="0 0 360 220" style="width:100%;height:100%">
-<g id=l><rect x="56" y="36" width="84" height="104" rx="30" fill="#e0a93b" opacity=".13"/><rect x="64" y="44" width="68" height="88" rx="22" fill="#e0a93b"/></g>
-<g id=r><rect x="220" y="36" width="84" height="104" rx="30" fill="#e0a93b" opacity=".13"/><rect x="228" y="44" width="68" height="88" rx="22" fill="#e0a93b"/></g>
-<path d="M154 173Q180 182 206 173Q180 183 154 173Z" fill="none" stroke="#e0a93b" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-</svg></div>
-<script>
-var e=[document.getElementById('l'),document.getElementById('r')];
-e.forEach(function(g){g.style.transformBox='fill-box';g.style.transformOrigin='center';g.style.transition='transform .08s';g.style.transform='scaleY(.94)'});
-function b(){e.forEach(function(g){g.style.transform='scaleY(.08)'});
-setTimeout(function(){e.forEach(function(g){g.style.transform='scaleY(.94)'})},130);
-setTimeout(b,2500+Math.random()*4500)}
-setTimeout(b,3000);
-</script>"""
+<div id=f style="width:100vw;height:100vh;background:#000;border-radius:18px;border:1px solid #3a2f12;box-sizing:border-box"></div>
+<script>%JS%</script>
+<script>var F=JuliaFace.mount(document.getElementById('f'));F.setHue(%HUE%);</script>"""
+
+POP_W = 100  # largeur du popup en dp (la hauteur suit)
+
+def _html():
+    js = ''
+    try:
+        base = os.path.dirname(os.path.abspath(__file__))
+        js = open(os.path.join(base, 'web', 'julia_visage.js'), encoding='utf-8').read()
+    except Exception:
+        STATE['s'] = 'julia_visage.js absent'
+    return HTML_T.replace('%JS%', js).replace('%HUE%', '42')
+
 
 def err(txt):
     try:
@@ -123,7 +124,7 @@ def _run():
             return
         d = ctx.getResources().getDisplayMetrics()
         dens = d.density
-        w, h = int(150 * dens), int(92 * dens)
+        w, h = int(POP_W * dens), int(POP_W * 0.61 * dens)
         lp = LP(w, h, 2038, 8 | 32 | 512, -3)
         lp.gravity = 51
         lp.x = int(d.widthPixels - w - 12 * dens)
@@ -132,7 +133,7 @@ def _run():
         v.setBackgroundColor(0)
         v.getSettings().setJavaScriptEnabled(True)
         v.setOnTouchListener(touch)
-        v.loadDataWithBaseURL(None, HTML, 'text/html', 'utf-8', None)
+        v.loadDataWithBaseURL(None, _html(), 'text/html', 'utf-8', None)
         wm.addView(v, lp)
         st['wv'], st['lp'] = v, lp
 
