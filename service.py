@@ -11,6 +11,7 @@ def w(name, txt):
         pass
 
 w('service_boot.txt', 'demarre pid=%d t=%d' % (os.getpid(), int(time.time())))
+w('service_err.txt', '')
 try:
     from jnius import autoclass as _ac
     for _c in ('org.kivy.android.PythonService', 'org.kivy.android.PythonActivity', 'android.provider.Settings',
