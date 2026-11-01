@@ -16,7 +16,7 @@ try:
     from jnius import autoclass as _ac
     for _c in ('org.kivy.android.PythonService', 'org.kivy.android.PythonActivity', 'android.provider.Settings',
                'android.os.Handler', 'android.os.Looper', 'android.webkit.WebView',
-               'android.view.WindowManager$LayoutParams', 'android.app.ActivityManager$RunningAppProcessInfo'):
+               'android.view.WindowManager$LayoutParams', 'android.app.ActivityManager$RunningAppProcessInfo', 'org.jacques.julia.Ears'):
         try:
             _ac(_c)
         except Exception:
@@ -39,6 +39,12 @@ try:
 except Exception:
     OV = None
     w('service_err.txt', 'overlay: ' + traceback.format_exc()[-250:])
+
+try:
+    import ears as EARS
+except Exception:
+    EARS = None
+    w('service_err.txt', 'ears: ' + traceback.format_exc()[-250:])
 
 def llama_pid(port):
     tok = b'\x00%d\x00' % port
@@ -102,11 +108,14 @@ def guard():
                         G['th2'] = threading.Thread(target=brain.start_emb, daemon=True)
                         G['th2'].start()
             pop = OV.STATE['s'] if (OV is not None and hasattr(OV, 'STATE')) else 'absent'
-            w('service_info.txt', 'cerveau: %s | popup: %s' % (cerv, pop))
+            ear = ('oreilles: %s | reveils %d | entendu: "%s"' % (EARS.STATE['s'], EARS.STATE['wakes'], EARS.STATE['heard'])) if EARS is not None else 'oreilles: absent'
+            w('service_info.txt', 'cerveau: %s | popup: %s | %s' % (cerv, pop, ear))
         except Exception:
             w('service_err.txt', traceback.format_exc()[-300:])
         time.sleep(5)
 
+if EARS is not None:
+    threading.Thread(target=EARS.run, daemon=True).start()
 threading.Thread(target=guard, daemon=True).start()
 if OV is not None:
     OV.run()
