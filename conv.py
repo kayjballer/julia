@@ -6,14 +6,14 @@
 #   - un travail terminé pendant que tu parles d'autre chose attend un moment calme, puis Julia l'annonce
 #   - tu parles pendant qu'elle parle -> elle se tait tout de suite et t'écoute
 #   - sa propre voix captée par le micro est reconnue et ignorée
-import re, time, threading, unicodedata, collections
+import re, time, threading, unicodedata, collections, difflib
 
 CFG = {'lang': 'FR', 'mem': 1, 'web': 1, 'rate': 1.0, 'pitch': 1.0, 'vname': '', 'tz': 0, 'hf': 1,
-       'pause': 'normale', 'conf': 0.45, 'mic': 'precis'}
+       'pause': 'normale', 'conf': 0.45, 'mic': 'precis', 'barge': 0}
 PAUSE = {'courte': 0.8, 'normale': 1.3, 'longue': 2.0}   # silence attendu avant d'envoyer la phrase au cerveau
 S = {'active': False, 'phase': 'idle', 'user': '', 'reply': '', 'last': 0.0, 'wakes': 0,
      'ears': 0.0, 'say_t': 0.0, 'tts_end': 0.0, 'was_busy': False, 'cuts': 0, 'err': '',
-     'buf': [], 'buf_conf': [], 'buf_t': 0.0, 'rep': 0, 'acks': 0}
+     'buf': [], 'buf_conf': [], 'buf_t': 0.0, 'rep': 0, 'acks': 0, 'last_req': ('', 0.0)}
 J = []            # travaux : {'jid','q','mode','spoken','filler','t0','st','lead','text','queued','data'}
 MAX_PAR = 2       # le serveur llama a 2 emplacements
 JOURNAL = collections.deque(maxlen=14)
@@ -50,7 +50,7 @@ def set_cfg(d):
         CFG['pause'] = d['pause']
     if d.get('mic') in ('precis', 'antiecho'):
         CFG['mic'] = d['mic']
-    for k in ('mem', 'web', 'hf'):
+    for k in ('mem', 'web', 'hf', 'barge'):
         if k in d:
             CFG[k] = 1 if d[k] else 0
     for k in ('rate', 'pitch'):
@@ -71,7 +71,7 @@ def state():
     now = time.time()
     jobs = [{'q': j['q'][:48], 'st': j['st']} for j in J if not (j['mode'] == 'stream' and (j['spoken'] > 0 or j['st'] == 'prête'))]
     return {'active': S['active'], 'phase': S['phase'], 'user': S['user'], 'reply': S['reply'],
-            'wakes': S['wakes'], 'cuts': S['cuts'], 'hf': CFG['hf'], 'err': S['err'], 'mic': CFG['mic'],
+            'wakes': S['wakes'], 'cuts': S['cuts'], 'hf': CFG['hf'], 'barge': CFG['barge'], 'err': S['err'], 'mic': CFG['mic'],
             'jobs': jobs, 'ears_age': round(now - S['ears'], 1) if S['ears'] else None}
 
 
@@ -100,22 +100,33 @@ def _tail():
 
 def _say(text):
     S['say_t'] = time.time()
-    SPOKEN.append((S['say_t'], set(norm(text))))
+    SPOKEN.append((S['say_t'], set(norm(text)), ' '.join(norm(text))))
     H['say'](text, CFG['pitch'], CFG['rate'], CFG['lang'], CFG['vname'])
 
 
 def _is_echo(text):
+    # Vosk transcrit mal la voix de Julia (« veux » -> « vas ») : on compare en tolérant les erreurs
     ws = norm(text)
     if not ws:
         return True
     now = time.time()
-    vocab = set()
-    for t, w in SPOKEN:
+    vocab, joined = set(), []
+    for t, w, jn in SPOKEN:
         if now - t < 25:
             vocab |= w
+            joined.append(jn)
     if not vocab:
         return False
-    return sum(1 for w in ws if w in vocab) / float(len(ws)) >= 0.7
+    vl = list(vocab)
+    hit = 0
+    for w in ws:
+        if w in vocab or (len(w) >= 3 and difflib.get_close_matches(w, vl, n=1, cutoff=0.72)):
+            hit += 1
+    if hit / float(len(ws)) >= 0.6:
+        return True
+    t, big = ' '.join(ws), ' '.join(joined)
+    m = difflib.SequenceMatcher(None, t, big).find_longest_match(0, len(t), 0, len(big))
+    return m.size >= 0.55 * len(t)
 
 
 # ---------- travaux ----------
@@ -192,22 +203,30 @@ def ear(kind, text, wake=False, conf=None):
             if wake and CFG['hf']:
                 _start(text)
             return state()
-        S['last'] = now
-        tail = _tail()
         ws = ' '.join(norm(text))
         stop = bool(STOP.match(ws) or CANCEL.match(ws))
+        speaking = _busy()
+        # Julia ne doit jamais se répondre à elle-même : le micro entend sa propre voix
+        if not stop:
+            if speaking:
+                if not (CFG['barge'] and kind in ('P', 'R') and not _is_echo(text)):
+                    if kind == 'R':
+                        _log(text, conf, 'ignoré : Julia parlait')
+                    return state()
+                if kind == 'P':          # coupure de parole (option) : tu as parlé par-dessus elle
+                    _cut()
+                    S['phase'] = 'listening'
+            elif now - S['tts_end'] < (2.2 if kind == 'R' else 0.9):
+                # elle vient de finir : un écho tardif est mal reconnu (confiance basse) et ressemble à ce qu'elle a dit
+                if _is_echo(text) or (conf is not None and conf < 0.75):
+                    if kind == 'R':
+                        _log(text, conf, 'écho ignoré')
+                    return state()
+        S['last'] = now
         if kind == 'P':
-            if tail and not stop and _is_echo(text):
-                return state()
-            if S['phase'] == 'speaking' or (tail and S['phase'] != 'listening'):
-                _cut()
-                S['phase'] = 'listening'
             S['buf_t'] = now          # il parle encore : on n'envoie rien tant qu'il n'a pas fini
             S['user'] = (' '.join(S['buf']) + ' ' + text).strip()
         elif kind == 'R':
-            if tail and not stop and _is_echo(text):
-                _log(text, conf, 'écho ignoré')
-                return state()
             if stop or (BYE.search(ws) and len(ws.split()) <= 6):
                 S['buf'], S['buf_conf'] = [], []
                 _request(text, conf)
@@ -308,6 +327,11 @@ def _request(text, conf=None):
         S.update(user=text, phase='listening', reply='')
         _say("Je n'ai pas bien compris, tu peux répéter ?")
         return
+    lw, lt = S['last_req']
+    if lw and time.time() - lt < 6 and difflib.SequenceMatcher(None, lw, ws).ratio() >= 0.85:
+        _log(text, conf, 'doublon ignoré')
+        return
+    S['last_req'] = (ws, time.time())
     S['rep'] = 0
     _log(text, conf, 'envoyé')
     # si elle était en train de parler de la réponse précédente, tu l'as coupée : on l'abandonne

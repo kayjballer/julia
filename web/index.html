@@ -99,6 +99,7 @@ nav svg,.ic{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.
 <div class="row"><div><b>Langue</b></div><div class="seg" data-seg="lang"><button class="btn" data-v="FR">FR</button><button class="btn" data-v="EN">EN</button></div></div>
 <div class="row"><div><b>Réveil mains libres</b><small>Dis « Julia » : la conversation s’ouvre, sans toucher le téléphone</small></div><button class="sw" data-k="hf" role="switch"></button></div>
 <div class="row"><div><b>Patience</b><small>Silence attendu avant qu’elle réponde. Allonge-le si elle te coupe en pleine phrase.</small></div><div class="seg" data-seg="pause"><button class="btn" data-v="courte">Courte</button><button class="btn" data-v="normale">Normale</button><button class="btn" data-v="longue">Longue</button></div></div>
+<div class="row"><div><b>Couper la parole à la voix</b><small>Expérimental : elle se tait quand tu parles par-dessus. Désactivé, elle ne s’écoute pas parler ; pour l’arrêter, touche l’écran ou dis « stop ». Marche mieux en mode Anti-écho.</small></div><button class="sw" data-k="barge" role="switch"></button></div>
 <div class="row"><div><b>Mode du micro</b><small>Précis : meilleure reconnaissance. Anti-écho : tu peux lui couper la parole plus facilement.</small></div><div class="seg" data-seg="mic"><button class="btn" data-v="precis">Précis</button><button class="btn" data-v="antiecho">Anti-écho</button></div></div>
 <div class="row"><div><b>Micro</b><small id="micsub">-</small></div><span class="tag" id="eartag">-</span></div></div>
 <div class="card" style="padding-bottom:4px"><div class="lab">Cerveau</div>
@@ -136,11 +137,11 @@ nav svg,.ic{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.
 <script src="julia_visage.js"></script>
 <script>
 var $=function(i){return document.getElementById(i)};
-var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'general',web:1,hue:265,pitch:'normal',vname:'',fs:'normale',hf:1,pause:'normale',mic:'precis'};
+var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'general',web:1,hue:265,pitch:'normal',vname:'',fs:'normale',hf:1,pause:'normale',mic:'precis',barge:0};
 try{var o2=JSON.parse(localStorage.getItem('julia_cfg2')||'{}');['voice','mem','speed','lang','web','vname','fs'].forEach(function(k){if(o2[k]!==undefined)cfg[k]=o2[k]})}catch(e){}
 try{Object.assign(cfg,JSON.parse(localStorage.getItem('julia_cfg3')||'{}'))}catch(e){}
 cfg.model='general';if(cfg.lang!=='EN')cfg.lang='FR';
-function pushConv(){fetch('/api/conv/config',{method:'POST',body:JSON.stringify({lang:cfg.lang,mem:cfg.mem,web:cfg.web,rate:RATE[cfg.speed]||1,pitch:PITCH[cfg.pitch]||1,vname:cfg.vname,hf:cfg.hf,pause:cfg.pause,mic:cfg.mic,tz:-new Date().getTimezoneOffset()})}).catch(function(){})}
+function pushConv(){fetch('/api/conv/config',{method:'POST',body:JSON.stringify({lang:cfg.lang,mem:cfg.mem,web:cfg.web,rate:RATE[cfg.speed]||1,pitch:PITCH[cfg.pitch]||1,vname:cfg.vname,hf:cfg.hf,pause:cfg.pause,mic:cfg.mic,barge:cfg.barge,tz:-new Date().getTimezoneOffset()})}).catch(function(){})}
 function save(){try{localStorage.setItem('julia_cfg3',JSON.stringify(cfg))}catch(e){}pushConv()}
 var spoken=0,vlist=[],RATE={lente:.85,normale:1,rapide:1.2},PITCH={grave:.75,normal:1,aigu:1.3};
 function loadVoices(){fetch('/api/voices?lang='+cfg.lang).then(function(r){return r.json()}).then(function(d){vlist=d.voices||[];paint()}).catch(function(){})}
