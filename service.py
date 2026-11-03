@@ -108,7 +108,7 @@ def guard():
                         G['th2'] = threading.Thread(target=brain.start_emb, daemon=True)
                         G['th2'].start()
             pop = OV.STATE['s'] if (OV is not None and hasattr(OV, 'STATE')) else 'absent'
-            ear = ('oreilles: %s | reveils %d | entendu: "%s"' % (EARS.STATE['s'], EARS.STATE['wakes'], EARS.STATE['heard'])) if EARS is not None else 'oreilles: absent'
+            ear = ('oreilles: %s | reveils %d | micro %s | appli %s | entendu: "%s"' % (EARS.STATE['s'], EARS.STATE['wakes'], EARS.STATE.get('mic', ''), EARS.STATE.get('app', '?'), EARS.STATE['heard'])) if EARS is not None else 'oreilles: absent'
             w('service_info.txt', 'cerveau: %s | popup: %s | %s' % (cerv, pop, ear))
         except Exception:
             w('service_err.txt', traceback.format_exc()[-300:])

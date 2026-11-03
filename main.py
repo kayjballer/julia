@@ -1334,7 +1334,7 @@ def svc_info():
         age = round(time.time() - int(rd('service_hb.txt').split()[0]))
     except Exception:
         pass
-    return {'ok': SVC['ok'], 'err': SVC['err'], 'step': SVC['step'], 'age': age, 'boot': rd('service_boot.txt')[:60], 'serr': rd('service_err.txt')[-90:], 'info': rd('service_info.txt')[:140]}
+    return {'ok': SVC['ok'], 'err': SVC['err'], 'step': SVC['step'], 'age': age, 'boot': rd('service_boot.txt')[:60], 'serr': rd('service_err.txt')[-90:], 'info': rd('service_info.txt')[:260]}
 
 
 def looks_action(text):
@@ -1594,6 +1594,13 @@ def speak_stop():
         pass
 
 
+def tts_busy():
+    try:
+        return bool(NT['eng'] is not None and NT['ready'] and NT['eng'].isSpeaking())
+    except Exception:
+        return False
+
+
 # ---------- Micro (STT) ----------
 @run_on_ui_thread
 def _stt_start(lang):
@@ -1686,6 +1693,8 @@ class H(SimpleHTTPRequestHandler):
                 return self._json(dict(brain.ST, emb=brain.EMB))
             except Exception as e:
                 return self._json({'stage': 'error', 'err': repr(e), 'pct': 0})
+        if u.path == '/api/conv':
+            return self._json(conv.state() if conv else {'active': False, 'phase': 'idle', 'ears_age': None, 'hf': 0})
         if u.path == '/api/netcheck':
             return self._json(netcheck(q.get('q', ['zeus'])[0]))
         super().do_GET()
@@ -1703,6 +1712,19 @@ class H(SimpleHTTPRequestHandler):
                              args=(str(data.get('text', '')), data.get('pitch', 1.0), data.get('rate', 1.0),
                                    data.get('lang', 'FR'), str(data.get('voice', '')))).start()
             return self._json({'ok': True})
+        if self.path.startswith('/api/conv') and conv:
+            if self.path == '/api/conv/ear':
+                return self._json(conv.ear(str(data.get('kind', 'P')), str(data.get('text', '')), bool(data.get('wake'))))
+            if self.path == '/api/conv/start':
+                return self._json(conv.start())
+            if self.path == '/api/conv/end':
+                return self._json(conv.end())
+            if self.path == '/api/conv/cut':
+                return self._json(conv.cut())
+            if self.path == '/api/conv/text':
+                return self._json(conv.text(str(data.get('text', ''))))
+            if self.path == '/api/conv/config':
+                return self._json(conv.set_cfg(data))
         if self.path == '/api/speak/stop':
             speak_stop()
             return self._json({'ok': True})
@@ -1742,6 +1764,16 @@ def warmup():
     except Exception:
         pass
 
+
+try:
+    import conv
+    conv.init(start_ask=start_ask, gen=GEN, gen_state=gen_state, say=speak_text, stop=speak_stop, busy=tts_busy)
+except Exception as _e:
+    conv = None
+    try:
+        brain.log('conv ' + repr(_e))
+    except Exception:
+        pass
 
 if ANDROID:
     _native_make()

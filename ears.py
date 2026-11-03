@@ -1,14 +1,14 @@
 # Oreilles de Julia : mot de réveil (« dis Julia », « salut Julia ») avec Vosk.
 # La classe Java org.jacques.julia.Ears écoute le micro ; ici on télécharge le modèle,
 # on lit les résultats et on détecte le mot de réveil. Tout tourne dans le service.
-import os, time, json, re, zipfile, urllib.request
+import os, time, json, re, zipfile, urllib.request, queue, threading
 
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
 MODELS = os.path.join(DATA, 'models')
 ZIP = os.path.join(MODELS, 'vosk-model-small-fr-0.22.zip')
 DIR = os.path.join(MODELS, 'vosk-model-small-fr-0.22')
 URL = 'https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip'
-STATE = {'s': 'init', 'wakes': 0, 'heard': '', 'last_wake': 0.0}
+STATE = {'s': 'init', 'wakes': 0, 'heard': '', 'last_wake': 0.0, 'mic': '', 'app': '?', 'conv': False, 'hf': True}
 
 NAME = r'(julia|julie|giulia|jolie|joulia)'
 WAKE = re.compile(r'\b(dis|salut|ok|okay|hey|hé|eh|oh|bonjour)\s+' + NAME + r'\b')
@@ -67,6 +67,57 @@ def buzz():
         pass
 
 
+# ---------- liaison avec l'appli : tout ce que les oreilles entendent part vers conv.py ----------
+APP = 'http://127.0.0.1:5000'
+Q = queue.Queue(maxsize=80)
+
+
+def _post(path, obj):
+    req = urllib.request.Request(APP + path, data=json.dumps(obj).encode(), headers={'Content-Type': 'application/json'})
+    return json.loads(urllib.request.urlopen(req, timeout=1.5).read() or b'{}')
+
+
+def _relaunch():
+    # l'appli est fermée : on la rouvre (permission « par-dessus les autres applis » requise, déjà accordée)
+    try:
+        from jnius import autoclass
+        ctx = autoclass('org.kivy.android.PythonService').mService
+        i = ctx.getPackageManager().getLaunchIntentForPackage(str(ctx.getPackageName()))
+        i.addFlags(0x10000000)
+        ctx.startActivity(i)
+    except Exception:
+        pass
+
+
+def _sender():
+    last_relaunch = 0.0
+    while True:
+        try:
+            kind, text, wake = Q.get(timeout=0.5)
+        except queue.Empty:
+            try:   # l'appli dit si une conversation est ouverte (ouverte aussi par le bouton micro)
+                d = json.loads(urllib.request.urlopen(APP + '/api/conv', timeout=1.5).read())
+                STATE['conv'], STATE['hf'], STATE['app'] = bool(d.get('active')), bool(d.get('hf', 1)), 'ok'
+            except Exception:
+                STATE['app'] = 'injoignable'
+            continue
+        try:
+            d = _post('/api/conv/ear', {'kind': kind, 'text': text, 'wake': wake})
+            STATE['conv'], STATE['hf'], STATE['app'] = bool(d.get('active')), bool(d.get('hf', 1)), 'ok'
+        except Exception:
+            STATE['app'] = 'injoignable'
+            if wake and time.time() - last_relaunch > 25:
+                last_relaunch = time.time()
+                _relaunch()
+
+
+def _forward(kind, text, wake):
+    try:
+        Q.put_nowait((kind, text, wake))
+    except queue.Full:
+        pass
+
+
 def run():
     try:
         from jnius import autoclass
@@ -80,6 +131,11 @@ def run():
             STATE['s'] = r[:90]
             return
         STATE['s'] = 'ecoute'
+        try:
+            STATE['mic'] = str(Ears.info())
+        except Exception:
+            pass
+        threading.Thread(target=_sender, daemon=True).start()
         while True:
             m = Ears.poll()
             if m is None:
@@ -96,9 +152,14 @@ def run():
             t = (d.get('text') or d.get('partial') or '').strip().lower()
             if t:
                 STATE['heard'] = t[-40:]
-            if kind in ('P', 'R') and t and is_wake(t) and time.time() - STATE['last_wake'] > 4:
+            wake = False
+            if kind in ('P', 'R') and t and is_wake(t) and time.time() - STATE['last_wake'] > 4 and not STATE['conv']:
                 STATE['last_wake'] = time.time()
                 STATE['wakes'] += 1
-                buzz()
+                wake = True
+                if STATE['hf']:
+                    buzz()
+            if kind in ('P', 'R') and t and (wake or STATE['conv']):
+                _forward(kind, t, wake)
     except Exception as e:
         STATE['s'] = ('erreur: ' + type(e).__name__ + ' ' + str(e))[:110]

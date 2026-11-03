@@ -40,6 +40,13 @@ def _signal(mem):
     now = time.time()
     try:
         import json, urllib.request
+        c = json.loads(urllib.request.urlopen('http://127.0.0.1:5000/api/conv', timeout=0.8).read())
+        if c.get('active'):
+            return {'thinking': 'thinking', 'speaking': 'speaking'}.get(c.get('phase'), 'listening')
+    except Exception:
+        pass
+    try:
+        import json, urllib.request
         g = json.loads(urllib.request.urlopen('http://127.0.0.1:5000/api/gen', timeout=0.8).read())
         gid = g.get('id') or 0
         if gid and not g.get('done'):

@@ -1,34 +1,117 @@
 package org.jacques.julia;
 
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
+import android.media.audiofx.AcousticEchoCanceler;
+import android.media.audiofx.AutomaticGainControl;
+import android.media.audiofx.NoiseSuppressor;
 import org.vosk.Model;
 import org.vosk.Recognizer;
-import org.vosk.android.RecognitionListener;
-import org.vosk.android.SpeechService;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-/* Oreilles de Julia : écoute le micro en continu avec Vosk et dépose les résultats
-   dans une file que Python lit avec poll() (jamais de rappel vers Python : plus sûr). */
-public class Ears implements RecognitionListener {
+/* Oreilles de Julia : écoute le micro en continu avec Vosk et dépose les résultats dans une file
+   que Python lit avec poll() (jamais de rappel vers Python : plus sûr).
+   Le micro est ouvert en mode « communication » avec annulation d'écho (AEC) quand le téléphone
+   la propose : Julia entend moins sa propre voix, ce qui permet de lui couper la parole. */
+public class Ears {
     private static final ConcurrentLinkedQueue<String> Q = new ConcurrentLinkedQueue<String>();
-    private static Ears inst = null;
-    private Model model = null;
-    private SpeechService svc = null;
-    private String lastPartial = "";
+    private static Thread th = null;
+    private static volatile boolean run = false;
+    private static Model model = null;
+    private static AudioRecord ar = null;
+    private static AcousticEchoCanceler aec = null;
+    private static NoiseSuppressor ns = null;
+    private static AutomaticGainControl agc = null;
+    private static String infoTxt = "";
+
+    private static AudioRecord open(int source, int buf) {
+        AudioRecord r = new AudioRecord(source, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, buf);
+        if (r.getState() != AudioRecord.STATE_INITIALIZED) {
+            r.release();
+            return null;
+        }
+        return r;
+    }
 
     public static synchronized String start(String modelPath, String grammar) {
-        if (inst != null) return "ok";
+        if (th != null) return "ok";
         try {
-            Ears e = new Ears();
-            e.model = new Model(modelPath);
-            Recognizer rec;
+            model = new Model(modelPath);
+            final Recognizer rec;
             if (grammar == null || grammar.length() == 0) {
-                rec = new Recognizer(e.model, 16000.0f);
+                rec = new Recognizer(model, 16000.0f);
             } else {
-                rec = new Recognizer(e.model, 16000.0f, grammar);
+                rec = new Recognizer(model, 16000.0f, grammar);
             }
-            e.svc = new SpeechService(rec, 16000.0f);
-            if (!e.svc.startListening(e)) return "micro occupe";
-            inst = e;
+            int min = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+            int buf = Math.max(min * 2, 16000);
+            String src = "communication";
+            ar = open(MediaRecorder.AudioSource.VOICE_COMMUNICATION, buf);
+            if (ar == null) {
+                src = "reconnaissance";
+                ar = open(MediaRecorder.AudioSource.VOICE_RECOGNITION, buf);
+            }
+            if (ar == null) return "micro occupe";
+            int sid = ar.getAudioSessionId();
+            String fx = "";
+            try {
+                if (AcousticEchoCanceler.isAvailable()) {
+                    aec = AcousticEchoCanceler.create(sid);
+                    if (aec != null) { aec.setEnabled(true); fx += " echo"; }
+                }
+            } catch (Throwable t) { }
+            try {
+                if (NoiseSuppressor.isAvailable()) {
+                    ns = NoiseSuppressor.create(sid);
+                    if (ns != null) { ns.setEnabled(true); fx += " bruit"; }
+                }
+            } catch (Throwable t) { }
+            try {
+                if (AutomaticGainControl.isAvailable()) {
+                    agc = AutomaticGainControl.create(sid);
+                    if (agc != null) { agc.setEnabled(true); fx += " gain"; }
+                }
+            } catch (Throwable t) { }
+            ar.startRecording();
+            if (ar.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                ar.release();
+                ar = null;
+                return "micro occupe";
+            }
+            infoTxt = src + (fx.length() == 0 ? " sans filtre" : fx);
+            run = true;
+            final AudioRecord rr = ar;
+            th = new Thread(new Runnable() {
+                public void run() {
+                    short[] b = new short[2048];
+                    String lastPartial = "";
+                    try {
+                        while (run) {
+                            int n = rr.read(b, 0, b.length);
+                            if (n <= 0) {
+                                if (n < 0) { push("E", "{\"err\":\"lecture micro " + n + "\"}"); break; }
+                                continue;
+                            }
+                            if (rec.acceptWaveForm(b, n)) {
+                                lastPartial = "";
+                                push("R", rec.getResult());
+                            } else {
+                                String p = rec.getPartialResult();
+                                if (p != null && !p.equals(lastPartial)) {
+                                    lastPartial = p;
+                                    push("P", p);
+                                }
+                            }
+                        }
+                    } catch (Throwable t) {
+                        push("E", "{\"err\":\"" + String.valueOf(t).replace("\"", "'") + "\"}");
+                    }
+                    try { rec.close(); } catch (Throwable t) { }
+                }
+            }, "julia-ears");
+            th.setDaemon(true);
+            th.start();
             return "ok";
         } catch (Throwable t) {
             return "erreur " + t;
@@ -36,43 +119,25 @@ public class Ears implements RecognitionListener {
     }
 
     public static synchronized void stop() {
-        if (inst == null) return;
-        try {
-            inst.svc.stop();
-            inst.svc.shutdown();
-            inst.model.close();
-        } catch (Throwable t) {
-            // rien
-        }
-        inst = null;
+        run = false;
+        try { if (ar != null) { ar.stop(); ar.release(); } } catch (Throwable t) { }
+        try { if (aec != null) aec.release(); } catch (Throwable t) { }
+        try { if (ns != null) ns.release(); } catch (Throwable t) { }
+        try { if (agc != null) agc.release(); } catch (Throwable t) { }
+        try { if (model != null) model.close(); } catch (Throwable t) { }
+        ar = null; aec = null; ns = null; agc = null; model = null; th = null;
     }
 
     public static String poll() {
         return Q.poll();
     }
 
-    private void push(String kind, String json) {
-        if (Q.size() > 60) Q.poll();
-        Q.add(kind + "|" + json);
+    public static String info() {
+        return infoTxt;
     }
 
-    @Override public void onPartialResult(String h) {
-        if (h != null && !h.equals(lastPartial)) {
-            lastPartial = h;
-            push("P", h);
-        }
-    }
-    @Override public void onResult(String h) {
-        lastPartial = "";
-        push("R", h);
-    }
-    @Override public void onFinalResult(String h) {
-        push("F", h);
-    }
-    @Override public void onError(Exception e) {
-        push("E", "{\"err\":\"" + String.valueOf(e).replace("\"", "'") + "\"}");
-    }
-    @Override public void onTimeout() {
-        push("T", "{}");
+    private static void push(String kind, String json) {
+        if (Q.size() > 60) Q.poll();
+        Q.add(kind + "|" + json);
     }
 }
