@@ -11,8 +11,34 @@ GENERAL = 'http://127.0.0.1:8080'
 CODER = 'http://127.0.0.1:8081'
 NOBRAIN = "Mon cerveau démarre, patiente quelques secondes."
 ST = {'active': False, 't0': 0.0, 'err': None}
-GEN = {'id': 0, 'text': '', 'done': True, 'brain': True, 'stage': '', 'model': 'general', 'truncated': False,
-       'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None, 'web_q': '', 'web_ms': 0, 'web_n': 0, 'route': '', 'act': ''}
+_GEN_NEW = {'id': 0, 'text': '', 'done': True, 'brain': True, 'stage': '', 'model': 'general', 'truncated': False,
+            'web_status': 'none', 'web_error': '', 'sources': [], 'hold': False, 'ttft': None, 'dur': None, 'web_q': '', 'web_ms': 0, 'web_n': 0, 'route': '', 'act': ''}
+_MAIN_GEN = dict(_GEN_NEW)
+_TL = threading.local()   # état du travail en cours dans ce fil (réponses en parallèle)
+
+
+class _GenProxy(object):
+    # GEN se comporte comme avant, mais chaque travail de fond a son propre dictionnaire :
+    # le fil du travail pose _TL.g, tout le code appelé depuis ce fil écrit donc dans le bon état.
+    def _d(self):
+        return getattr(_TL, 'g', None) or _MAIN_GEN
+
+    def __getitem__(self, k):
+        return self._d()[k]
+
+    def __setitem__(self, k, v):
+        self._d()[k] = v
+
+    def get(self, k, d=None):
+        return self._d().get(k, d)
+
+    def update(self, *a, **k):
+        self._d().update(*a, **k)
+
+
+GEN = _GenProxy()
+JOBS = {}
+JOB_N = [0]
 LASTWEB = {'ts': 0, 'ctx': '', 'sources': [], 'q': '', 'mode': None}
 VOUS = re.compile(r"\b(vous|votre|vos)\b", re.I)
 CODE_RE = re.compile(r"\b(code|coder|coding|python|javascript|java|html|css|bash|shell|termux|linux|script|fonction|"
@@ -548,8 +574,11 @@ def pick(text, pref):
 def stream_brain(model, messages, on_text, text):
     code = model == 'code'
     n = 520 if code else (380 if LONG_RE.search(text) else 150)
+    if getattr(_TL, 'short', False) and not code:
+        n = min(n, 200)
     body = json.dumps({'messages': messages, 'max_tokens': n, 'temperature': 0.2 if code else 0.5,
-                       'top_p': 0.9, 'repeat_penalty': 1.1, 'stream': True, 'cache_prompt': True, 'id_slot': 0}).encode()
+                       'top_p': 0.9, 'repeat_penalty': 1.1, 'stream': True, 'cache_prompt': True,
+                       'id_slot': getattr(_TL, 'slot', 0)}).encode()
     url = (CODER if code else GENERAL) + '/v1/chat/completions'
     req = urllib.request.Request(url, data=body, headers={'Content-Type': 'application/json'})
     finish = None
@@ -1487,12 +1516,62 @@ def start_ask(data):
     return {'ok': True, 'id': gid}
 
 
-def gen_state():
-    t = GEN['text'] if GEN['done'] else ('' if GEN['hold'] else clean_think(GEN['text']))
-    return {'text': t, 'done': GEN['done'], 'brain': GEN['brain'], 'id': GEN['id'],
-            'stage': GEN['stage'], 'model': GEN['model'], 'truncated': GEN['truncated'],
-            'web_status': GEN['web_status'], 'web_error': GEN['web_error'], 'sources': GEN['sources'],
-            'ttft': GEN['ttft'], 'dur': GEN['dur'], 'web_q': GEN['web_q'], 'web_ms': GEN['web_ms'], 'web_n': GEN['web_n'], 'route': GEN['route'], 'act': GEN['act']}
+def gen_state(g=None):
+    G = g if g is not None else _MAIN_GEN
+    t = G['text'] if G['done'] else ('' if G['hold'] else clean_think(G['text']))
+    return {'text': t, 'done': G['done'], 'brain': G['brain'], 'id': G['id'],
+            'stage': G['stage'], 'model': G['model'], 'truncated': G['truncated'],
+            'web_status': G['web_status'], 'web_error': G['web_error'], 'sources': G['sources'],
+            'ttft': G['ttft'], 'dur': G['dur'], 'web_q': G['web_q'], 'web_ms': G['web_ms'], 'web_n': G['web_n'], 'route': G['route'], 'act': G['act']}
+
+
+# ---------- Travaux en parallèle (conversation) : chaque question a son état et son emplacement llama ----------
+def start_job(data, slot=0):
+    JOB_N[0] += 1
+    jid = JOB_N[0]
+    g = dict(_GEN_NEW)
+    g.update(id=jid, text='', done=False, slot=slot, asr=bool(data.get('asr')))
+    JOBS[jid] = g
+    for old in sorted(JOBS)[:-12]:
+        JOBS.pop(old, None)
+    args = (jid, str(data.get('text', '')), data.get('lang', 'FR'), data.get('voice', 0), data.get('mem', 1),
+            data.get('web', 1), data.get('model', 'auto'), local_now(data))
+
+    def run():
+        _TL.g, _TL.slot, _TL.short = g, slot, True
+        try:
+            generate(*args)
+        except Exception as e:
+            try:
+                brain.log('job ' + repr(e))
+            except Exception:
+                pass
+            if g['id'] == jid:
+                g.update(text=NOBRAIN, brain=False, stage='', hold=False)
+                g['done'] = True
+
+    threading.Thread(target=run, daemon=True).start()
+    return {'ok': True, 'id': jid}
+
+
+def job_state(jid):
+    g = JOBS.get(jid)
+    if g is None:
+        return None
+    d = gen_state(g)
+    d['jid'] = jid
+    d['gone'] = g['id'] != jid      # annulé : l'état ne bouge plus
+    return d
+
+
+def job_cancel(jid):
+    g = JOBS.get(jid)
+    if g is not None:
+        g['id'] += 1
+
+
+def job_drop(jid):
+    JOBS.pop(jid, None)
 
 
 def memory_info():
@@ -1761,17 +1840,18 @@ def warmup():
     try:
         msgs = build_messages('Bonjour', 'FR', 1, '', '', False, datetime.datetime.now())
         msgs[-1] = {'role': 'user', 'content': '.'}
-        body = json.dumps({'messages': msgs, 'max_tokens': 1, 'stream': False, 'cache_prompt': True, 'id_slot': 0}).encode()
-        req = urllib.request.Request(GENERAL + '/v1/chat/completions', data=body,
-                                     headers={'Content-Type': 'application/json'})
-        urllib.request.urlopen(req, timeout=300).read()
+        for sl in (0, 1):
+            body = json.dumps({'messages': msgs, 'max_tokens': 1, 'stream': False, 'cache_prompt': True, 'id_slot': sl}).encode()
+            req = urllib.request.Request(GENERAL + '/v1/chat/completions', data=body,
+                                         headers={'Content-Type': 'application/json'})
+            urllib.request.urlopen(req, timeout=300).read()
     except Exception:
         pass
 
 
 try:
     import conv
-    conv.init(start_ask=start_ask, gen=GEN, gen_state=gen_state, say=speak_text, stop=speak_stop, busy=tts_busy)
+    conv.init(start_job=start_job, job_state=job_state, job_cancel=job_cancel, job_drop=job_drop, say=speak_text, stop=speak_stop, busy=tts_busy)
 except Exception as _e:
     conv = None
     try:

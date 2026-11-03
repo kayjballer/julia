@@ -71,6 +71,7 @@ nav svg,.ic{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.
 <div style="flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:12px;padding:0 20px">
 <div id="orb"><div id="face"></div></div>
 <div><div id="ttl">En veille</div><div id="sub"></div></div>
+<div id="jobs" style="display:flex;flex-wrap:wrap;justify-content:center;gap:6px;min-height:0"></div>
 </div>
 <div style="padding:0 20px 8px">
 <div style="min-height:70px;max-height:24vh;overflow-y:auto"><p id="u"></p><p id="j"></p></div>
@@ -212,7 +213,10 @@ if(d.listening&&n<60){tmr.push(setTimeout(function(){poll(n+1)},250));return}
 if(d.error&&!d.text){fail(d.error);return}
 if(!d.text){fail('rien entendu');return}
 uu.textContent=d.text;setState('think');jj.textContent='Je réfléchis…';askBrain(d.text)}).catch(function(){fail('serveur injoignable')})}
-var CV={on:0,phase:'idle',ears:0};
+var CV={on:0,phase:'idle',ears:0},JL='';
+function showJobs(l){var k=JSON.stringify(l);if(k===JL)return;JL=k;var el=$('jobs');el.textContent='';
+l.forEach(function(j){var c=document.createElement('span');c.className='tag';c.style.cssText='border-color:var(--c);color:var(--c)';
+c.textContent=(j.st==='prête'?'Prête : ':(j.st==='attente'?'En attente : ':'Je cherche : '))+j.q;el.appendChild(c)})}
 function micAct(){
 if(CV.on){fetch('/api/conv/'+(CV.phase==='speaking'||CV.phase==='thinking'?'cut':'end'),{method:'POST',body:'{}'}).then(convSync);return}
 if(state!=='rest'){stopAll();return}
@@ -220,7 +224,7 @@ if(EO){fetch('/api/conv/start',{method:'POST',body:'{}'}).then(convSync);return}
 startListen()}
 mic.onclick=micAct;
 function convSync(){fetch('/api/conv').then(function(r){return r.json()}).then(function(d){
-CV.phase=d.phase;
+CV.phase=d.phase;showJobs(d.jobs||[]);
 if(d.active){
  if(!CV.on){CV.on=1;stopped=1;clearTimers();stopSpeech();$('cf').style.display='none';jj.style.color=''}
  var ns={listening:'listen',thinking:'think',speaking:'speak'}[d.phase]||'listen';
@@ -228,7 +232,7 @@ if(d.active){
  if(d.user!==uu.textContent)uu.textContent=d.user||'';
  var r=d.reply||(d.phase==='thinking'?'Je réfléchis…':'');
  if(r!==jj.textContent){jj.textContent=r;jj.parentNode.scrollTop=jj.parentNode.scrollHeight}
-}else if(CV.on){CV.on=0;pushHist();setState('rest')}
+}else if(CV.on){CV.on=0;pushHist();setState('rest');showJobs([])}
 }).catch(function(){})}
 setInterval(convSync,500);
 jj.textContent='Dis « Julia » ou touche le micro pour parler';jj.style.color='var(--mu)';

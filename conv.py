@@ -1,28 +1,34 @@
 # Conversation continue de Julia (tourne dans le processus de l'appli, à côté de main.py).
 # Les oreilles (service, Vosk) envoient ce qu'elles entendent à /api/conv/ear ; ici on décide :
-#   - réveil « dis Julia » -> la conversation s'ouvre, plus besoin de répéter le mot de réveil
-#   - fin de phrase -> question au cerveau, réponse dite phrase par phrase pendant qu'elle s'écrit
-#   - tu parles pendant qu'elle parle -> elle se tait tout de suite et t'écoute (coupure de parole)
-#   - son propre écho (sa voix captée par le micro) est reconnu et ignoré
-#   - silence prolongé ou « au revoir » -> retour à l'attente du mot de réveil
+#   - réveil « dis Julia » -> la conversation s'ouvre ; elle reste ouverte tant que tu parles ou qu'un travail tourne
+#   - chaque question devient un TRAVAIL (recherche, réflexion) qui tourne en arrière-plan ;
+#     tu peux continuer à parler : une nouvelle question reçoit sa propre réponse tout de suite
+#   - un travail terminé pendant que tu parles d'autre chose attend un moment calme, puis Julia l'annonce
+#   - tu parles pendant qu'elle parle -> elle se tait tout de suite et t'écoute
+#   - sa propre voix captée par le micro est reconnue et ignorée
 import re, time, threading, unicodedata, collections
 
 CFG = {'lang': 'FR', 'mem': 1, 'web': 1, 'rate': 1.0, 'pitch': 1.0, 'vname': '', 'tz': 0, 'hf': 1,
        'pause': 'normale', 'conf': 0.45, 'mic': 'precis'}
 PAUSE = {'courte': 0.8, 'normale': 1.3, 'longue': 2.0}   # silence attendu avant d'envoyer la phrase au cerveau
-S = {'active': False, 'phase': 'idle', 'user': '', 'reply': '', 'last': 0.0, 'wakes': 0, 'gid': 0,
+S = {'active': False, 'phase': 'idle', 'user': '', 'reply': '', 'last': 0.0, 'wakes': 0,
      'ears': 0.0, 'say_t': 0.0, 'tts_end': 0.0, 'was_busy': False, 'cuts': 0, 'err': '',
-     'buf': [], 'buf_conf': [], 'buf_t': 0.0, 'rep': 0}
-JOURNAL = collections.deque(maxlen=14)   # ce que le micro a compris, pour juger sa fiabilité
+     'buf': [], 'buf_conf': [], 'buf_t': 0.0, 'rep': 0, 'acks': 0}
+J = []            # travaux : {'jid','q','mode','spoken','filler','t0','st','lead','text','queued','data'}
+MAX_PAR = 2       # le serveur llama a 2 emplacements
+JOURNAL = collections.deque(maxlen=14)
 H = {}
 L = threading.RLock()
 SPOKEN = collections.deque(maxlen=40)   # (heure, mots) des phrases dites : sert à reconnaitre l'écho
 IDLE_S = 30.0
 
 WAKE = re.compile(r"^\s*(?:(?:dis|salut|ok|okay|hey|hé|eh|oh|bonjour)\s+)?(?:julia|julie|giulia|jolie|joulia)\b[\s,.!?]*", re.I)
-STOP = re.compile(r"^(?:ok |bon |oui )?(?:julia )?(?:stop|arrete|arrete toi|tais toi|chut|attends|attend|ca suffit|silence|pause|laisse tomber)(?: julia)?$")
+STOP = re.compile(r"^(?:ok |bon |oui )?(?:julia )?(?:stop|arrete|arrete toi|tais toi|chut|attends|attend|ca suffit|silence|pause)(?: julia)?$")
+CANCEL = re.compile(r"^(?:ok |bon |oui )?(?:julia )?(?:laisse tomber|annule tout|annule|oublie ca|oublie)(?: julia)?$")
 BYE = re.compile(r"\b(au revoir|a plus tard|a tout a l heure|c est tout|on s arrete|fin de la conversation|bonne nuit|merci julia)\b")
 CUT_AT = re.compile(r"(?<!\d)[.!?…]+(?=\s)|\n")
+ACKS = ["Une seconde, je regarde ça.", "Je cherche ça. Dis-moi si tu veux autre chose en attendant.",
+        "Je vérifie, je te dis ça dans un instant."]
 
 
 def norm(t):
@@ -63,9 +69,19 @@ def set_cfg(d):
 
 def state():
     now = time.time()
+    jobs = [{'q': j['q'][:48], 'st': j['st']} for j in J if not (j['mode'] == 'stream' and (j['spoken'] > 0 or j['st'] == 'prête'))]
     return {'active': S['active'], 'phase': S['phase'], 'user': S['user'], 'reply': S['reply'],
             'wakes': S['wakes'], 'cuts': S['cuts'], 'hf': CFG['hf'], 'err': S['err'], 'mic': CFG['mic'],
-            'ears_age': round(now - S['ears'], 1) if S['ears'] else None}
+            'jobs': jobs, 'ears_age': round(now - S['ears'], 1) if S['ears'] else None}
+
+
+def _log(text, conf, how):
+    JOURNAL.append({'t': time.strftime('%H:%M:%S'), 'text': (text or '')[:90],
+                    'conf': None if conf is None else round(conf, 2), 'how': how})
+
+
+def log():
+    return list(JOURNAL)[::-1]
 
 
 # ---------- voix ----------
@@ -80,15 +96,6 @@ def _busy():
 def _tail():
     # vrai tant que le micro peut encore entendre la voix de Julia (parole en cours + petite queue)
     return _busy() or time.time() - S['tts_end'] < 1.5
-
-
-def _log(text, conf, how):
-    JOURNAL.append({'t': time.strftime('%H:%M:%S'), 'text': (text or '')[:90],
-                    'conf': None if conf is None else round(conf, 2), 'how': how})
-
-
-def log():
-    return list(JOURNAL)[::-1]
 
 
 def _say(text):
@@ -111,19 +118,66 @@ def _is_echo(text):
     return sum(1 for w in ws if w in vocab) / float(len(ws)) >= 0.7
 
 
-def _cut(cancel_gen=False):
-    # Julia se tait tout de suite
-    S['gid'] = -1
+# ---------- travaux ----------
+def _kill(j, cancel=True):
+    if cancel and j.get('jid'):
+        try:
+            H['job_cancel'](j['jid'])
+        except Exception:
+            pass
+    if j.get('jid'):
+        try:
+            H['job_drop'](j['jid'])
+        except Exception:
+            pass
+    if j in J:
+        J.remove(j)
+    S['last'] = time.time()
+
+
+def _cut():
+    # Julia se tait tout de suite ; le travail qui parlait est abandonné (tu l'as coupé exprès),
+    # les travaux de fond qui n'ont encore rien dit continuent.
     try:
         H['stop']()
     except Exception:
         pass
-    if cancel_gen:
-        try:
-            H['gen']['id'] += 1
-        except Exception:
-            pass
+    for j in list(J):
+        if j.get('lead_said'):
+            # une réponse de fond qu'il a coupée n'est pas perdue : on la redira à un moment calme
+            j.update(spoken=0, lead_said=False, mode='hold')
+        elif j['spoken'] > 0:
+            _kill(j)
     S['cuts'] += 1
+
+
+def _running():
+    return [j for j in J if j.get('jid') and j['st'] == 'cherche']
+
+
+def _launch(j):
+    used = set(x.get('slot') for x in _running())
+    slot = 0 if 0 not in used else 1
+    r = H['start_job'](dict(j['data'], text=j['q']), slot)
+    j.update(jid=r['id'], slot=slot, st='cherche', queued=False, t0=time.time())
+
+
+def _new_job(text):
+    data = {'lang': CFG['lang'], 'voice': 0, 'mem': CFG['mem'], 'web': CFG['web'], 'model': 'general', 'asr': 1,
+            'ts': int(time.time() * 1000), 'tz': CFG['tz']}
+    j = {'jid': None, 'q': text, 'mode': 'stream', 'spoken': 0, 'filler': False, 't0': time.time(), 'st': 'attente',
+         'text': '', 'queued': True, 'data': data, 'lead_said': False, 'slot': None}
+    # l'ancien travail de premier plan passe en arrière-plan : son résultat sera annoncé plus tard
+    for o in J:
+        if o['mode'] == 'stream':
+            o['mode'] = 'hold'
+    J.append(j)
+    if len(_running()) < MAX_PAR:
+        _launch(j)
+    else:
+        S['acks'] += 1
+        _say("Je note, je m'en occupe juste après.")
+    return j
 
 
 # ---------- événements des oreilles ----------
@@ -141,16 +195,15 @@ def ear(kind, text, wake=False, conf=None):
         S['last'] = now
         tail = _tail()
         ws = ' '.join(norm(text))
-        stop = bool(STOP.match(ws))
+        stop = bool(STOP.match(ws) or CANCEL.match(ws))
         if kind == 'P':
             if tail and not stop and _is_echo(text):
                 return state()
-            if S['phase'] in ('speaking',) or (tail and S['phase'] != 'listening'):
+            if S['phase'] == 'speaking' or (tail and S['phase'] != 'listening'):
                 _cut()
                 S['phase'] = 'listening'
-            if S['phase'] in ('listening', 'thinking'):
-                S['buf_t'] = now          # il parle encore : on n'envoie rien tant qu'il n'a pas fini
-                S['user'] = (' '.join(S['buf']) + ' ' + text).strip()
+            S['buf_t'] = now          # il parle encore : on n'envoie rien tant qu'il n'a pas fini
+            S['user'] = (' '.join(S['buf']) + ' ' + text).strip()
         elif kind == 'R':
             if tail and not stop and _is_echo(text):
                 _log(text, conf, 'écho ignoré')
@@ -168,7 +221,6 @@ def ear(kind, text, wake=False, conf=None):
 
 
 def _flush():
-    # appelé par la boucle : le silence est assez long, la phrase est finie
     if not S['buf']:
         return
     text = ' '.join(S['buf'])
@@ -188,15 +240,19 @@ def _start(text=''):
 
 def start():
     with L:
-        S['ears'] = S['ears'] or 0.0
         _start('')
     return state()
 
 
 def end(say_bye=False):
     with L:
-        S.update(active=False, phase='idle')
-        _cut(cancel_gen=True)
+        S.update(active=False, phase='idle', buf=[], buf_conf=[])
+        try:
+            H['stop']()
+        except Exception:
+            pass
+        for j in list(J):
+            _kill(j)
         if say_bye:
             _say("À tout à l'heure.")
     return state()
@@ -205,7 +261,7 @@ def end(say_bye=False):
 def cut():
     # appui sur l'écran pendant qu'elle parle : elle se tait, la conversation reste ouverte
     with L:
-        _cut(cancel_gen=True)
+        _cut()
         S.update(phase='listening', last=time.time())
     return state()
 
@@ -219,20 +275,26 @@ def text(t):
     return state()
 
 
-def _tz():
-    return CFG['tz']
-
-
 def _request(text, conf=None):
     text = WAKE.sub('', text).strip()
     ws = ' '.join(norm(text))
     if not ws:
         S['phase'] = 'listening'
         return
+    if CANCEL.match(ws):
+        _log(text, conf, 'tout annulé')
+        try:
+            H['stop']()
+        except Exception:
+            pass
+        for j in list(J):
+            _kill(j)
+        S.update(phase='listening', user=text, reply='')
+        return
     if STOP.match(ws):
-        _cut(cancel_gen=True)
-        S.update(phase='listening', user=text)
         _log(text, conf, 'stop')
+        _cut()
+        S.update(phase='listening', user=text)
         return
     if BYE.search(ws) and len(ws.split()) <= 6:
         S.update(user=text, reply='')
@@ -248,68 +310,94 @@ def _request(text, conf=None):
         return
     S['rep'] = 0
     _log(text, conf, 'envoyé')
-    _cut()
-    S.update(phase='thinking', user=text, reply='', last=time.time())
+    # si elle était en train de parler de la réponse précédente, tu l'as coupée : on l'abandonne
+    if _busy():
+        _cut()
+    S.update(user=text, reply='', last=time.time())
     try:
-        r = H['start_ask']({'text': text, 'lang': CFG['lang'], 'voice': 0, 'mem': CFG['mem'], 'web': CFG['web'],
-                            'model': 'general', 'asr': 1, 'ts': int(time.time() * 1000), 'tz': _tz()})
+        _new_job(text)
     except Exception as e:
         S.update(phase='listening', err=repr(e)[:80])
         return
-    gid = r['id']
-    S['gid'] = gid
-    threading.Thread(target=_speaker, args=(gid,), daemon=True).start()
+    S['phase'] = 'thinking'
 
 
-# ---------- réponse dite pendant qu'elle s'écrit ----------
+# ---------- voix des travaux ----------
 def _speakable(t):
     return re.sub(r"```[\s\S]*?(```|$)", " (le code est à l'écran) ", t)
 
 
-def _speaker(gid):
-    spoken, filler, t0 = 0, False, time.time()
-    try:
-        while True:
-            if S['gid'] != gid or not S['active']:
-                return
-            g = H['gen_state']()
-            if g.get('id') != gid:
-                return
-            text, done = g.get('text') or '', bool(g.get('done'))
-            S['reply'] = text
-            sp = _speakable(text)
-            while True:
-                rest = sp[spoken:]
-                m = CUT_AT.search(rest)
-                if m and not done:
-                    seg, adv = rest[:m.end()], m.end()
-                elif done and rest.strip():
-                    seg, adv = rest, len(rest)
-                else:
-                    break
-                spoken += adv
-                if len(seg.strip()) > 2:
-                    S['phase'] = 'speaking'
-                    _say(seg.strip())
-                if done:
-                    break
-            if (not text) and g.get('stage') == 'search' and not filler and time.time() - t0 > 1.5:
-                filler = True
+def _speak_new(j, st):
+    # dit les phrases terminées du travail ; True si quelque chose a été dit
+    done = bool(st.get('done'))
+    sp = _speakable(st.get('text') or '')
+    said = False
+    while True:
+        rest = sp[j['spoken']:]
+        m = CUT_AT.search(rest)
+        if m and not done:
+            seg, adv = rest[:m.end()], m.end()
+        elif done and rest.strip():
+            seg, adv = rest, len(rest)
+        else:
+            break
+        j['spoken'] += adv
+        if len(seg.strip()) > 2:
+            if not j['lead_said'] and j['mode'] == 'hold':
+                j['lead_said'] = True
+                _say('À propos de « %s » : ' % ' '.join(j['q'].split()[:8]))
+            _say(seg.strip())
+            said = True
+        if done:
+            break
+    return said
+
+
+def _quiet():
+    # moment calme : il ne parle pas, elle ne parle pas
+    now = time.time()
+    return (not S['buf']) and now - S['buf_t'] > 1.0 and now - S['last'] > 1.2 and not _tail()
+
+
+def _tick():
+    now = time.time()
+    # lancer les travaux en attente dès qu'un emplacement est libre
+    for j in J:
+        if j['queued'] and len(_running()) < MAX_PAR:
+            _launch(j)
+    stream_active = any(j['mode'] == 'stream' for j in J)
+    for j in list(J):
+        if not j.get('jid'):
+            continue
+        st = H['job_state'](j['jid'])
+        if st is None or st.get('gone'):
+            _kill(j, cancel=False)
+            continue
+        j['text'] = st.get('text') or ''
+        done = bool(st.get('done'))
+        if done and j['st'] != 'prête':
+            j['st'] = 'prête'
+        if j['mode'] == 'stream':
+            S['reply'] = j['text'] if (j['text'] or j['spoken']) else S['reply']
+            if _speak_new(j, st):
                 S['phase'] = 'speaking'
-                _say('Une seconde, je regarde ça.')
-            if done and spoken >= len(sp):
-                break
-            time.sleep(0.15)
-        while _busy() and S['gid'] == gid and S['active']:
-            time.sleep(0.15)
-        with L:
-            if S['gid'] == gid and S['active']:
-                S.update(phase='listening', last=time.time())
-    except Exception as e:
-        S['err'] = repr(e)[:80]
-        with L:
-            if S['gid'] == gid:
-                S['phase'] = 'listening'
+            # pas de réponse après un moment : un petit mot pour ne pas laisser un silence
+            waited = now - j['t0']
+            if not j['text'] and not j['filler'] and not _tail() and (
+                    (st.get('stage') == 'search' and waited > 1.2) or waited > 4.5):
+                j['filler'] = True
+                _say(ACKS[S['acks'] % len(ACKS)])
+                S['acks'] += 1
+            if done and j['spoken'] >= len(_speakable(j['text'])) and not _busy():
+                _kill(j, cancel=False)
+        else:   # travail de fond : on attend la fin puis un moment calme
+            if done and _quiet() and not stream_active:
+                S['reply'], S['user'] = j['text'], j['q']
+                _speak_new(j, st)
+                S['phase'] = 'speaking'
+                if j['spoken'] >= len(_speakable(j['text'])):
+                    j['mode'] = 'stream'      # fini de dire : sera retiré au prochain passage
+    return stream_active
 
 
 def _loop():
@@ -323,10 +411,24 @@ def _loop():
             with L:
                 if not S['active']:
                     S['buf'], S['buf_conf'] = [], []
-                elif S['buf'] and now - S['buf_t'] >= PAUSE.get(CFG['pause'], 1.3):
-                    _flush()
-                if S['active'] and S['phase'] == 'listening' and not b and not S['buf'] and now - S['last'] > IDLE_S:
-                    S.update(active=False, phase='idle')
-        except Exception:
-            pass
+                    if J:
+                        for j in list(J):
+                            _kill(j)
+                else:
+                    if S['buf'] and now - S['buf_t'] >= PAUSE.get(CFG['pause'], 1.3):
+                        _flush()
+                    _tick()
+                    if b:
+                        S['phase'] = 'speaking'
+                    elif any(j['mode'] == 'stream' and j['st'] != 'prête' for j in J):
+                        S['phase'] = 'thinking'
+                    else:
+                        S['phase'] = 'listening'
+                    # la conversation reste ouverte tant qu'un travail tourne ou qu'on parle
+                    if not J and not b and not S['buf'] and now - S['last'] > IDLE_S:
+                        S.update(active=False, phase='idle')
+                    elif J:
+                        S['last'] = max(S['last'], now - 5)
+        except Exception as e:
+            S['err'] = repr(e)[:80]
         time.sleep(0.15)
