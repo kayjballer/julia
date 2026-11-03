@@ -4,8 +4,6 @@ import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.media.audiofx.AcousticEchoCanceler;
-import android.media.audiofx.AutomaticGainControl;
-import android.media.audiofx.NoiseSuppressor;
 import org.vosk.Model;
 import org.vosk.Recognizer;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -21,8 +19,6 @@ public class Ears {
     private static Model model = null;
     private static AudioRecord ar = null;
     private static AcousticEchoCanceler aec = null;
-    private static NoiseSuppressor ns = null;
-    private static AutomaticGainControl agc = null;
     private static String infoTxt = "";
 
     private static AudioRecord open(int source, int buf) {
@@ -35,6 +31,12 @@ public class Ears {
     }
 
     public static synchronized String start(String modelPath, String grammar) {
+        return start(modelPath, grammar, "precis");
+    }
+
+    /* mode « precis » : micro de reconnaissance, aucun filtre (meilleure transcription)
+       mode « antiecho » : micro de communication + annulation d'écho (permet de couper la parole) */
+    public static synchronized String start(String modelPath, String grammar, String mode) {
         if (th != null) return "ok";
         try {
             model = new Model(modelPath);
@@ -44,33 +46,23 @@ public class Ears {
             } else {
                 rec = new Recognizer(model, 16000.0f, grammar);
             }
+            rec.setWords(true);
+            boolean anti = "antiecho".equals(mode);
             int min = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
             int buf = Math.max(min * 2, 16000);
-            String src = "communication";
-            ar = open(MediaRecorder.AudioSource.VOICE_COMMUNICATION, buf);
+            String src = anti ? "anti-echo" : "precis";
+            ar = open(anti ? MediaRecorder.AudioSource.VOICE_COMMUNICATION : MediaRecorder.AudioSource.VOICE_RECOGNITION, buf);
             if (ar == null) {
-                src = "reconnaissance";
-                ar = open(MediaRecorder.AudioSource.VOICE_RECOGNITION, buf);
+                src = "micro standard";
+                ar = open(MediaRecorder.AudioSource.MIC, buf);
             }
             if (ar == null) return "micro occupe";
             int sid = ar.getAudioSessionId();
             String fx = "";
             try {
-                if (AcousticEchoCanceler.isAvailable()) {
+                if (anti && AcousticEchoCanceler.isAvailable()) {
                     aec = AcousticEchoCanceler.create(sid);
                     if (aec != null) { aec.setEnabled(true); fx += " echo"; }
-                }
-            } catch (Throwable t) { }
-            try {
-                if (NoiseSuppressor.isAvailable()) {
-                    ns = NoiseSuppressor.create(sid);
-                    if (ns != null) { ns.setEnabled(true); fx += " bruit"; }
-                }
-            } catch (Throwable t) { }
-            try {
-                if (AutomaticGainControl.isAvailable()) {
-                    agc = AutomaticGainControl.create(sid);
-                    if (agc != null) { agc.setEnabled(true); fx += " gain"; }
                 }
             } catch (Throwable t) { }
             ar.startRecording();
@@ -90,7 +82,7 @@ public class Ears {
                         while (run) {
                             int n = rr.read(b, 0, b.length);
                             if (n <= 0) {
-                                if (n < 0) { push("E", "{\"err\":\"lecture micro " + n + "\"}"); break; }
+                                if (n < 0) { if (run) push("E", "{\"err\":\"lecture micro " + n + "\"}"); break; }
                                 continue;
                             }
                             if (rec.acceptWaveForm(b, n)) {
@@ -105,7 +97,7 @@ public class Ears {
                             }
                         }
                     } catch (Throwable t) {
-                        push("E", "{\"err\":\"" + String.valueOf(t).replace("\"", "'") + "\"}");
+                        if (run) push("E", "{\"err\":\"" + String.valueOf(t).replace("\"", "'") + "\"}");
                     }
                     try { rec.close(); } catch (Throwable t) { }
                 }
@@ -120,12 +112,12 @@ public class Ears {
 
     public static synchronized void stop() {
         run = false;
+        Thread old = th;
         try { if (ar != null) { ar.stop(); ar.release(); } } catch (Throwable t) { }
+        try { if (old != null) old.join(2000); } catch (Throwable t) { }
         try { if (aec != null) aec.release(); } catch (Throwable t) { }
-        try { if (ns != null) ns.release(); } catch (Throwable t) { }
-        try { if (agc != null) agc.release(); } catch (Throwable t) { }
         try { if (model != null) model.close(); } catch (Throwable t) { }
-        ar = null; aec = null; ns = null; agc = null; model = null; th = null;
+        ar = null; aec = null; model = null; th = null;
     }
 
     public static String poll() {

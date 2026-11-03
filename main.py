@@ -1420,6 +1420,8 @@ def generate(gid, text, lang, voice, mem, web, pref, dt):
     if info['status'] == 'stale':
         note = ("(Attention : ces informations ont été enregistrées il y a %d jour(s) et peuvent ne plus être à jour.)"
                 % max(1, int(info['age'] / 86400)))
+    if GEN.get('asr') and lang != 'EN':
+        note = (note + ' ' if note else '') + "(La question vient de la reconnaissance vocale : certains mots peuvent être mal reconnus. Devine l'intention la plus probable, sans parler de la transcription.)"
     msgs = build_messages(text, lang, mem, info['ctx'], note, model == 'code', dt)
     hold = GEN['hold']
     buf = []
@@ -1477,7 +1479,7 @@ def start_ask(data):
     GEN['id'] += 1
     gid = GEN['id']
     GEN.update(text='', done=False, brain=True, stage='', truncated=False, web_status='none', web_error='',
-               sources=[], hold=False, ttft=None, dur=None, web_q='', web_ms=0, web_n=0, route='', act='')
+               sources=[], hold=False, ttft=None, dur=None, web_q='', web_ms=0, web_n=0, route='', act='', asr=bool(data.get('asr')))
     threading.Thread(target=generate, daemon=True,
                      args=(gid, str(data.get('text', '')), data.get('lang', 'FR'), data.get('voice', 0),
                            data.get('mem', 1), data.get('web', 1), data.get('model', 'auto'),
@@ -1693,6 +1695,8 @@ class H(SimpleHTTPRequestHandler):
                 return self._json(dict(brain.ST, emb=brain.EMB))
             except Exception as e:
                 return self._json({'stage': 'error', 'err': repr(e), 'pct': 0})
+        if u.path == '/api/conv/log':
+            return self._json(conv.log() if conv else [])
         if u.path == '/api/conv':
             return self._json(conv.state() if conv else {'active': False, 'phase': 'idle', 'ears_age': None, 'hf': 0})
         if u.path == '/api/netcheck':
@@ -1714,7 +1718,7 @@ class H(SimpleHTTPRequestHandler):
             return self._json({'ok': True})
         if self.path.startswith('/api/conv') and conv:
             if self.path == '/api/conv/ear':
-                return self._json(conv.ear(str(data.get('kind', 'P')), str(data.get('text', '')), bool(data.get('wake'))))
+                return self._json(conv.ear(str(data.get('kind', 'P')), str(data.get('text', '')), bool(data.get('wake')), data.get('conf')))
             if self.path == '/api/conv/start':
                 return self._json(conv.start())
             if self.path == '/api/conv/end':

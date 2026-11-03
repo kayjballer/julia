@@ -97,6 +97,8 @@ nav svg,.ic{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.
 <div class="card" style="padding-bottom:4px"><div class="lab">Écoute</div>
 <div class="row"><div><b>Langue</b></div><div class="seg" data-seg="lang"><button class="btn" data-v="FR">FR</button><button class="btn" data-v="EN">EN</button></div></div>
 <div class="row"><div><b>Réveil mains libres</b><small>Dis « Julia » : la conversation s’ouvre, sans toucher le téléphone</small></div><button class="sw" data-k="hf" role="switch"></button></div>
+<div class="row"><div><b>Patience</b><small>Silence attendu avant qu’elle réponde. Allonge-le si elle te coupe en pleine phrase.</small></div><div class="seg" data-seg="pause"><button class="btn" data-v="courte">Courte</button><button class="btn" data-v="normale">Normale</button><button class="btn" data-v="longue">Longue</button></div></div>
+<div class="row"><div><b>Mode du micro</b><small>Précis : meilleure reconnaissance. Anti-écho : tu peux lui couper la parole plus facilement.</small></div><div class="seg" data-seg="mic"><button class="btn" data-v="precis">Précis</button><button class="btn" data-v="antiecho">Anti-écho</button></div></div>
 <div class="row"><div><b>Micro</b><small id="micsub">-</small></div><span class="tag" id="eartag">-</span></div></div>
 <div class="card" style="padding-bottom:4px"><div class="lab">Cerveau</div>
 <div class="row"><div><b>Accès à Internet</b><small>Base locale d’abord, puis recherche</small></div><button class="sw" data-k="web" role="switch"></button></div>
@@ -115,6 +117,7 @@ nav svg,.ic{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.
 <div class="card" style="display:flex;flex-direction:column;gap:14px">
 <div><div class="m"><span>Julia (appli + cerveau)</span><span id="jm">-</span></div><div class="bar"><div id="jbar" style="width:0"></div></div></div>
 <div><div class="m"><span>Température</span><span id="tmp">-</span></div><div class="bar"><div id="tbar" style="width:0"></div></div></div></div>
+<div class="card"><div class="lab">Ce que j’ai entendu</div><div id="jr" style="font-size:13px;line-height:1.5;color:#c4c9da">Rien pour l’instant. Lance une conversation et parle.</div></div>
 <div class="card"><div class="lab">Dernière réponse</div><div id="lastr" style="font-size:14px;line-height:20px;color:#c4c9da">Pas encore de réponse.</div></div>
 <div class="card" style="padding:4px 16px"><div class="row" style="justify-content:flex-start"><span class="dot" id="d1"></span><div><b>Cerveau</b><small id="s1">-</small></div></div><div class="row" style="justify-content:flex-start"><span class="dot" id="d2"></span><div><b>Service</b><small id="s2">-</small></div></div><div class="row" style="justify-content:flex-start"><span class="dot" id="d3"></span><div><b>Popup</b><small id="s3">-</small></div></div><div class="row" style="justify-content:flex-start"><span class="dot" id="d4"></span><div><b>Oreilles</b><small id="s4">-</small></div></div></div>
 </div></section>
@@ -132,11 +135,11 @@ nav svg,.ic{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.
 <script src="julia_visage.js"></script>
 <script>
 var $=function(i){return document.getElementById(i)};
-var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'general',web:1,hue:265,pitch:'normal',vname:'',fs:'normale',hf:1};
+var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'general',web:1,hue:265,pitch:'normal',vname:'',fs:'normale',hf:1,pause:'normale',mic:'precis'};
 try{var o2=JSON.parse(localStorage.getItem('julia_cfg2')||'{}');['voice','mem','speed','lang','web','vname','fs'].forEach(function(k){if(o2[k]!==undefined)cfg[k]=o2[k]})}catch(e){}
 try{Object.assign(cfg,JSON.parse(localStorage.getItem('julia_cfg3')||'{}'))}catch(e){}
 cfg.model='general';if(cfg.lang!=='EN')cfg.lang='FR';
-function pushConv(){fetch('/api/conv/config',{method:'POST',body:JSON.stringify({lang:cfg.lang,mem:cfg.mem,web:cfg.web,rate:RATE[cfg.speed]||1,pitch:PITCH[cfg.pitch]||1,vname:cfg.vname,hf:cfg.hf,tz:-new Date().getTimezoneOffset()})}).catch(function(){})}
+function pushConv(){fetch('/api/conv/config',{method:'POST',body:JSON.stringify({lang:cfg.lang,mem:cfg.mem,web:cfg.web,rate:RATE[cfg.speed]||1,pitch:PITCH[cfg.pitch]||1,vname:cfg.vname,hf:cfg.hf,pause:cfg.pause,mic:cfg.mic,tz:-new Date().getTimezoneOffset()})}).catch(function(){})}
 function save(){try{localStorage.setItem('julia_cfg3',JSON.stringify(cfg))}catch(e){}pushConv()}
 var spoken=0,vlist=[],RATE={lente:.85,normale:1,rapide:1.2},PITCH={grave:.75,normal:1,aigu:1.3};
 function loadVoices(){fetch('/api/voices?lang='+cfg.lang).then(function(r){return r.json()}).then(function(d){vlist=d.voices||[];paint()}).catch(function(){})}
@@ -283,7 +286,7 @@ $('mcl').onclick=function(){mp.classList.remove('on')};
 /* onglets */
 function show(t){tab=t;['visage','ecrire','controle','ressources'].forEach(function(v){$(v).classList.toggle('on',v===t)});
 document.querySelectorAll('#nav button').forEach(function(b){b.classList.toggle('on',b.dataset.t===t)});
-$('cf').style.bottom='calc(env(safe-area-inset-bottom,0px) + 86px)';if(t==='ecrire')chatRender();if(t==='ressources')sys()}
+$('cf').style.bottom='calc(env(safe-area-inset-bottom,0px) + 86px)';if(t==='ecrire')chatRender();if(t==='ressources'){sys();jlog()}}
 document.querySelectorAll('#nav button').forEach(function(b){b.onclick=function(){show(b.dataset.t)}});
 /* cerveau + ressources */
 var EO=false,BR='-',bar=$('brainbar'),bdone=0;
@@ -308,7 +311,12 @@ var pop=seg('popup:');$('s3').textContent=pop||'-';dotc($('d3'),pop==='affiche'?
 var ea=seg('oreilles:'),mi=seg('micro'),ap=seg('appli');EO=ea.indexOf('ecoute')===0;$('s4').textContent=ea?(ea+(mi?' · micro '+mi:'')+(ap?' · appli '+ap:'')):'-';$('micsub').textContent=mi?('Filtres : '+mi):'-';var eo=ea.indexOf('ecoute')===0;dotc($('d4'),eo?'#3ddc84':'#ffb84d');$('eartag').textContent=eo?'Actif':'Inactif';$('eartag').className='tag'+(eo?' g':'');
 if(LAST){$('lastr').textContent='1er mot : '+(LAST.ttft!=null?LAST.ttft+' s':'-')+' · total : '+(LAST.dur!=null?LAST.dur+' s':'-')+(LAST.web_q?'\nRecherche « '+LAST.web_q+' » : '+LAST.web_n+' source(s), '+LAST.web_ms+' ms':'');$('lastr').style.whiteSpace='pre-line'}
 }).catch(function(){})}
-setInterval(sys,4000);sys();
+function jlog(){if(tab!=='ressources')return;fetch('/api/conv/log').then(function(r){return r.json()}).then(function(l){
+if(!l.length)return;var h='';l.slice(0,8).forEach(function(x){var c=x.conf==null?'':Math.round(x.conf*100)+' %';
+var col=x.how==='envoyé'?'var(--gr)':(x.how==='à répéter'?'#ffb84d':'var(--mu)');
+h+='<div style="padding:6px 0;border-bottom:1px solid var(--ln)"><span style="color:var(--mu);font:11px var(--mono)">'+x.t+'</span> <span style="color:'+col+';font:11px var(--mono)">'+esc(x.how)+(c?' · '+c:'')+'</span><br>'+esc(x.text)+'</div>'});
+$('jr').innerHTML=h}).catch(function(){})}
+setInterval(jlog,2000);setInterval(sys,4000);sys();
 paint();setHue(cfg.hue);applyState();applyText();memLoad();loadVoices();setTimeout(loadVoices,4000);pushConv();setInterval(pushConv,20000);convSync();
 </script>
 </body></html>

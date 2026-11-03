@@ -7,9 +7,13 @@
 #   - silence prolongé ou « au revoir » -> retour à l'attente du mot de réveil
 import re, time, threading, unicodedata, collections
 
-CFG = {'lang': 'FR', 'mem': 1, 'web': 1, 'rate': 1.0, 'pitch': 1.0, 'vname': '', 'tz': 0, 'hf': 1}
+CFG = {'lang': 'FR', 'mem': 1, 'web': 1, 'rate': 1.0, 'pitch': 1.0, 'vname': '', 'tz': 0, 'hf': 1,
+       'pause': 'normale', 'conf': 0.45, 'mic': 'precis'}
+PAUSE = {'courte': 0.8, 'normale': 1.3, 'longue': 2.0}   # silence attendu avant d'envoyer la phrase au cerveau
 S = {'active': False, 'phase': 'idle', 'user': '', 'reply': '', 'last': 0.0, 'wakes': 0, 'gid': 0,
-     'ears': 0.0, 'say_t': 0.0, 'tts_end': 0.0, 'was_busy': False, 'cuts': 0, 'err': ''}
+     'ears': 0.0, 'say_t': 0.0, 'tts_end': 0.0, 'was_busy': False, 'cuts': 0, 'err': '',
+     'buf': [], 'buf_conf': [], 'buf_t': 0.0, 'rep': 0}
+JOURNAL = collections.deque(maxlen=14)   # ce que le micro a compris, pour juger sa fiabilité
 H = {}
 L = threading.RLock()
 SPOKEN = collections.deque(maxlen=40)   # (heure, mots) des phrases dites : sert à reconnaitre l'écho
@@ -36,6 +40,10 @@ def set_cfg(d):
     for k in ('lang', 'vname'):
         if k in d:
             CFG[k] = str(d[k])
+    if d.get('pause') in PAUSE:
+        CFG['pause'] = d['pause']
+    if d.get('mic') in ('precis', 'antiecho'):
+        CFG['mic'] = d['mic']
     for k in ('mem', 'web', 'hf'):
         if k in d:
             CFG[k] = 1 if d[k] else 0
@@ -56,7 +64,7 @@ def set_cfg(d):
 def state():
     now = time.time()
     return {'active': S['active'], 'phase': S['phase'], 'user': S['user'], 'reply': S['reply'],
-            'wakes': S['wakes'], 'cuts': S['cuts'], 'hf': CFG['hf'], 'err': S['err'],
+            'wakes': S['wakes'], 'cuts': S['cuts'], 'hf': CFG['hf'], 'err': S['err'], 'mic': CFG['mic'],
             'ears_age': round(now - S['ears'], 1) if S['ears'] else None}
 
 
@@ -72,6 +80,15 @@ def _busy():
 def _tail():
     # vrai tant que le micro peut encore entendre la voix de Julia (parole en cours + petite queue)
     return _busy() or time.time() - S['tts_end'] < 1.5
+
+
+def _log(text, conf, how):
+    JOURNAL.append({'t': time.strftime('%H:%M:%S'), 'text': (text or '')[:90],
+                    'conf': None if conf is None else round(conf, 2), 'how': how})
+
+
+def log():
+    return list(JOURNAL)[::-1]
 
 
 def _say(text):
@@ -110,7 +127,7 @@ def _cut(cancel_gen=False):
 
 
 # ---------- événements des oreilles ----------
-def ear(kind, text, wake=False):
+def ear(kind, text, wake=False, conf=None):
     text = (text or '').strip()
     now = time.time()
     S['ears'] = now
@@ -124,19 +141,41 @@ def ear(kind, text, wake=False):
         S['last'] = now
         tail = _tail()
         ws = ' '.join(norm(text))
+        stop = bool(STOP.match(ws))
         if kind == 'P':
-            if tail and not STOP.match(ws) and _is_echo(text):
+            if tail and not stop and _is_echo(text):
                 return state()
             if S['phase'] in ('speaking',) or (tail and S['phase'] != 'listening'):
                 _cut()
                 S['phase'] = 'listening'
             if S['phase'] in ('listening', 'thinking'):
-                S['user'] = text
+                S['buf_t'] = now          # il parle encore : on n'envoie rien tant qu'il n'a pas fini
+                S['user'] = (' '.join(S['buf']) + ' ' + text).strip()
         elif kind == 'R':
-            if tail and not STOP.match(ws) and _is_echo(text):
+            if tail and not stop and _is_echo(text):
+                _log(text, conf, 'écho ignoré')
                 return state()
-            _request(text)
+            if stop or (BYE.search(ws) and len(ws.split()) <= 6):
+                S['buf'], S['buf_conf'] = [], []
+                _request(text, conf)
+            else:
+                # Vosk coupe à la moindre pause : on recolle les morceaux jusqu'à un vrai silence
+                S['buf'].append(text)
+                S['buf_conf'].append(conf)
+                S['buf_t'] = now
+                S['user'] = ' '.join(S['buf'])
     return state()
+
+
+def _flush():
+    # appelé par la boucle : le silence est assez long, la phrase est finie
+    if not S['buf']:
+        return
+    text = ' '.join(S['buf'])
+    cs = [x for x in S['buf_conf'] if x is not None]
+    conf = (sum(cs) / len(cs)) if cs else None
+    S['buf'], S['buf_conf'] = [], []
+    _request(text, conf)
 
 
 def _start(text=''):
@@ -184,7 +223,7 @@ def _tz():
     return CFG['tz']
 
 
-def _request(text):
+def _request(text, conf=None):
     text = WAKE.sub('', text).strip()
     ws = ' '.join(norm(text))
     if not ws:
@@ -193,16 +232,27 @@ def _request(text):
     if STOP.match(ws):
         _cut(cancel_gen=True)
         S.update(phase='listening', user=text)
+        _log(text, conf, 'stop')
         return
     if BYE.search(ws) and len(ws.split()) <= 6:
         S.update(user=text, reply='')
+        _log(text, conf, 'au revoir')
         end(say_bye=True)
         return
+    if conf is not None and conf < CFG['conf'] and S['rep'] < 2:
+        # le micro n'est pas sûr : mieux vaut redemander que répondre à côté
+        S['rep'] += 1
+        _log(text, conf, 'à répéter')
+        S.update(user=text, phase='listening', reply='')
+        _say("Je n'ai pas bien compris, tu peux répéter ?")
+        return
+    S['rep'] = 0
+    _log(text, conf, 'envoyé')
     _cut()
     S.update(phase='thinking', user=text, reply='', last=time.time())
     try:
         r = H['start_ask']({'text': text, 'lang': CFG['lang'], 'voice': 0, 'mem': CFG['mem'], 'web': CFG['web'],
-                            'model': 'general', 'ts': int(time.time() * 1000), 'tz': _tz()})
+                            'model': 'general', 'asr': 1, 'ts': int(time.time() * 1000), 'tz': _tz()})
     except Exception as e:
         S.update(phase='listening', err=repr(e)[:80])
         return
@@ -271,8 +321,12 @@ def _loop():
                 S['tts_end'] = now
             S['was_busy'] = b
             with L:
-                if S['active'] and S['phase'] == 'listening' and not b and now - S['last'] > IDLE_S:
+                if not S['active']:
+                    S['buf'], S['buf_conf'] = [], []
+                elif S['buf'] and now - S['buf_t'] >= PAUSE.get(CFG['pause'], 1.3):
+                    _flush()
+                if S['active'] and S['phase'] == 'listening' and not b and not S['buf'] and now - S['last'] > IDLE_S:
                     S.update(active=False, phase='idle')
         except Exception:
             pass
-        time.sleep(0.3)
+        time.sleep(0.15)
