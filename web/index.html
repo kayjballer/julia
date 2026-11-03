@@ -41,7 +41,7 @@ html,body{margin:0;height:100%;background:#000;color:#f3e3c3;font-family:system-
 <div id="top"><div><div id="ttl" style="font-size:24px;font-weight:700;letter-spacing:.05em;color:#f5b21f">J.U.L.I.A</div><span id="chip" style="display:inline-block;margin-top:6px;font-size:12px;padding:3px 10px;border-radius:10px;border:0.5px solid #f0a830;color:#f0a830">En veille</span></div>
 <button id="gear" class="b" aria-label="Paramètres" style="position:absolute;right:20px;top:calc(env(safe-area-inset-top,0px) + 14px);padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
 <button id="hbtn" class="b" aria-label="Historique" style="position:absolute;left:20px;top:calc(env(safe-area-inset-top,0px) + 14px);padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
-<div class="side" style="left:20px">Modèle<br><i id="bd" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#888;margin-right:6px"></i><span id="mdl">Qwen3.5 2B</span><br>Mémoire<br><span id="cnt">0 souvenir</span><br>RAM<br><span id="ram">-</span><br><span id="jm" style="opacity:.75"></span><br>Température<br><span id="tmp">-</span><br>Service<br><span id="svc">-</span></div>
+<div class="side" style="left:20px">Modèle<br><i id="bd" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#888;margin-right:6px"></i><span id="mdl">Qwen2.5 1.5B</span><br>Mémoire<br><span id="cnt">0 souvenir</span><br>RAM<br><span id="ram">-</span><br><span id="jm" style="opacity:.75"></span><br>Température<br><span id="tmp">-</span><br>Service<br><span id="svc">-</span></div>
 <div class="side" style="right:20px;text-align:right">Langue<br><span id="lg">Français</span></div>
 <div id="bot">
 <div style="text-align:center;min-height:78px;max-height:26vh;overflow-y:auto;margin-bottom:6px">
@@ -75,7 +75,156 @@ html,body{margin:0;height:100%;background:#000;color:#f3e3c3;font-family:system-
 <div class="rw"><span>Effacer la mémoire</span><button id="wipe" class="b" style="border-color:#e26a6a;color:#f0a0a0">Effacer</button></div>
 </div></div>
 <div id="hp" style="position:absolute;inset:0;z-index:2;background:rgba(0,0,0,.98);padding:calc(env(safe-area-inset-top,0px) + 16px) 20px 20px;display:flex;flex-direction:column;transform:translateY(100%);transition:transform .25s"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:20px;font-weight:500">Historique</span><span><button id="hclr" class="b">Effacer</button> <button id="hcl" class="b" aria-label="Fermer" style="padding:7px 9px"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span></div><div id="hlist" style="flex:1;overflow:auto"></div></div>
-<script src="julia_visage.js"></script>
+<script>
+/* julia_face.js v2 — visage minimaliste : deux yeux (rectangles arrondis) + une bouche.
+   Fond noir, aplats de couleur, aucune animation continue :
+   - clignements et regard : minuteurs ponctuels (rien ne tourne entre deux)
+   - bouche : boucle d'animation seulement pendant que Julia parle
+   API : mount(el) -> { setState, setLevel, setHue, setColor, lookAt, lookReset }
+   États : idle | listening | thinking | speaking (alias : veille, ecoute, reflexion, reponse) */
+(function () {
+  'use strict';
+
+  var STATES = {
+    idle: 'idle', veille: 'idle',
+    listening: 'listening', ecoute: 'listening', 'écoute': 'listening',
+    thinking: 'thinking', reflexion: 'thinking', 'réflexion': 'thinking',
+    speaking: 'speaking', reponse: 'speaking', 'réponse': 'speaking'
+  };
+
+  var CSS =
+    '.jf{--jc:#e0a93b;--lvl:0;--sx:1;--sy:.94;display:block;width:100%;height:100%}' +
+    '.jf svg{display:block;width:100%;height:100%}' +
+    '.jf .e{transform-box:fill-box;transform-origin:center;' +
+    'transform:translate(var(--gx,0px),var(--gy,0px)) scale(var(--sx),var(--sy));transition:transform .22s ease-out}' +
+    '.jf[data-state=idle]{--sx:1;--sy:.94}' +
+    '.jf[data-state=listening]{--sx:1.06;--sy:calc(1.08 + var(--lvl)*.22)}' +
+    '.jf[data-state=thinking]{--sx:1.1;--sy:.5}' +
+    '.jf[data-state=speaking]{--sx:1;--sy:.84}' +
+    '.jf.bl .e{--sy:.08;transition-duration:.07s}' +
+    '@media (prefers-reduced-motion:reduce){.jf .e{transition:none}}';
+
+  var SVG =
+    '<svg viewBox="0 0 360 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Julia">' +
+    '<g class="e"><rect x="56" y="36" width="84" height="104" rx="30" fill="var(--jc)" opacity=".13"/>' +
+    '<rect x="64" y="44" width="68" height="88" rx="22" fill="var(--jc)"/></g>' +
+    '<g class="e"><rect x="220" y="36" width="84" height="104" rx="30" fill="var(--jc)" opacity=".13"/>' +
+    '<rect x="228" y="44" width="68" height="88" rx="22" fill="var(--jc)"/></g>' +
+    '<path class="m" d="" fill="none" stroke="var(--jc)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '</svg>';
+
+  function mount(el) {
+    if (!document.getElementById('jf-style')) {
+      var st = document.createElement('style');
+      st.id = 'jf-style';
+      st.textContent = CSS;
+      document.head.appendChild(st);
+    }
+    el.classList.add('jf');
+    el.innerHTML = SVG;
+
+    var mouth = el.querySelector('.m');
+    var state = 'idle', level = 0, lastLevel = 0, open = 0, raf = 0, nextSyl = 0, sylTarget = 0;
+    var blinkT = 0, gazeT = 0, hold = 0;
+
+    function drawMouth(o, smile) {
+      var cy = 178 - smile * 9;               // coins (relevés si sourire)
+      var ty = 178 + smile * 6;               // courbe du haut
+      var by = ty + 1 + o * 44;               // courbe du bas = ouverture
+      var w = 26 - o * 6;
+      mouth.setAttribute('d', 'M' + (180 - w) + ' ' + cy + 'Q180 ' + ty + ' ' + (180 + w) + ' ' + cy +
+        'Q180 ' + by + ' ' + (180 - w) + ' ' + cy + 'Z');
+      mouth.setAttribute('fill', o > 0.12 ? 'var(--jc)' : 'none');
+    }
+    function restSmile() {
+      return state === 'idle' ? 0.6 : state === 'listening' ? 0.15 : state === 'thinking' ? 0 : 0.4;
+    }
+
+    function tick(t) {
+      var target = 0;
+      if (state === 'speaking') {
+        if (t - lastLevel < 300) {
+          target = Math.min(1, level * 1.4);
+        } else {
+          if (t > nextSyl) {
+            sylTarget = Math.random() < 0.18 ? 0.04 : 0.25 + Math.random() * 0.65;
+            nextSyl = t + 80 + Math.random() * 110;
+          }
+          target = sylTarget;
+        }
+      }
+      open += (target - open) * 0.4;
+      drawMouth(open, restSmile());
+      if (state === 'speaking' || open > 0.01) raf = requestAnimationFrame(tick);
+      else { raf = 0; drawMouth(0, restSmile()); }
+    }
+
+    // Clignement : un minuteur ponctuel, rien ne tourne entre deux clignements.
+    function scheduleBlink() {
+      clearTimeout(blinkT);
+      if (document.hidden) return;
+      blinkT = setTimeout(function () {
+        el.classList.add('bl');
+        blinkT = setTimeout(function () { el.classList.remove('bl'); scheduleBlink(); }, 130);
+      }, 2500 + Math.random() * 4500);
+    }
+
+    // Regard qui balaie pendant la réflexion : un tic par seconde, seulement dans cet état.
+    function setGaze(x, y) {
+      el.style.setProperty('--gx', x + 'px');
+      el.style.setProperty('--gy', y + 'px');
+    }
+    function startThinkGaze() {
+      stopThinkGaze();
+      var xs = [-16, 0, 16, 8, -8];
+      gazeT = setInterval(function () {
+        if (!hold) setGaze(xs[Math.floor(Math.random() * xs.length)], Math.round(Math.random() * 8 - 6));
+      }, 1000);
+    }
+    function stopThinkGaze() { clearInterval(gazeT); gazeT = 0; }
+
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) { clearTimeout(blinkT); stopThinkGaze(); }
+      else { scheduleBlink(); if (state === 'thinking') startThinkGaze(); }
+    });
+
+    var api = {
+      setState: function (s) {
+        s = STATES[s] || 'idle';
+        state = s;
+        el.dataset.state = s;
+        if (s !== 'speaking' && s !== 'listening') api.setLevel(0);
+        stopThinkGaze();
+        if (s === 'thinking') startThinkGaze(); else if (!hold) setGaze(0, 0);
+        if (!raf) raf = requestAnimationFrame(tick);
+      },
+      setLevel: function (v) {
+        level = Math.max(0, Math.min(1, +v || 0));
+        lastLevel = performance.now();
+        el.style.setProperty('--lvl', level.toFixed(2));
+      },
+      setHue: function (h) { el.style.setProperty('--jc', 'hsl(' + h + ' 92% 58%)'); },
+      setColor: function (c) { el.style.setProperty('--jc', c); },
+      lookAt: function (x, y) {
+        var r = el.getBoundingClientRect();
+        hold = 1;
+        setGaze((Math.max(-1, Math.min(1, ((x - r.left) / r.width - 0.5) * 2)) * 18).toFixed(1),
+                (Math.max(-1, Math.min(1, ((y - r.top) / r.height - 0.5) * 2)) * 10).toFixed(1));
+      },
+      lookReset: function () { hold = 0; setGaze(0, 0); },
+      getState: function () { return state; }
+    };
+
+    api.setState('idle');
+    drawMouth(0, 0.6);
+    scheduleBlink();
+    return api;
+  }
+
+  window.JuliaFace = { mount: mount };
+})();
+
+</script>
 <script>
 var dpr=window.devicePixelRatio||1;
 var cfg={voice:1,mem:1,speed:'normale',lang:'FR',model:'auto',web:1,dbg:0,mic:'moyen',hue:42,pitch:'normal',vname:'',plain:0,fs:'normale'};
@@ -94,7 +243,7 @@ document.querySelectorAll('.tg').forEach(function(e){e.classList.toggle('on',!!c
 document.querySelectorAll('[data-seg]').forEach(function(g){g.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',cfg[g.dataset.seg]===b.dataset.v)})});
 var vb=document.getElementById('vbtn'),vs=vlist,vi=0;for(var k=0;k<vs.length;k++)if(vs[k].name===cfg.vname)vi=k;
 if(vb)vb.textContent=vs.length?('Voix '+(vi+1)+'/'+vs.length):'Système';
-document.getElementById('lg').textContent=LG[cfg.lang];document.getElementById('mdl').textContent='Qwen3.5 2B';
+document.getElementById('lg').textContent=LG[cfg.lang];document.getElementById('mdl').textContent='Qwen2.5 1.5B';
 document.querySelectorAll('#sw b').forEach(function(s){s.style.borderColor=+s.dataset.h===cfg.hue?'#fff':'transparent'});if(window.applyText)applyText()}
 [[42,'55%'],[200,'55%'],[150,'50%'],[320,'60%']].forEach(function(c){var s=document.createElement('b');s.dataset.h=c[0];s.style.cssText='width:26px;height:26px;border-radius:50%;background:hsl('+c[0]+',85%,'+c[1]+');border:2px solid transparent;cursor:pointer';s.onclick=function(){cfg.hue=c[0];save();paint();if(window.applyHue)applyHue()};document.getElementById('sw').appendChild(s)});
 document.querySelectorAll('.tg').forEach(function(e){e.onclick=function(){cfg[e.dataset.k]=cfg[e.dataset.k]?0:1;save();paint()}});
@@ -245,7 +394,7 @@ else if(st==="ready"){if(!done){done=1;bar.style.display="block";msg.textContent
 }
 setInterval(tick,2000);tick();
 function fg(x){return (x/1024).toFixed(1).replace('.',',')}
-function sys(){fetch('/api/sys').then(function(r){return r.json()}).then(function(d){var v=d.svc||{};document.getElementById('svc').textContent=(v.age!=null&&v.age<20)?('actif'+(v.info?' \u00b7 '+v.info:'')):(v.serr?'service en erreur : '+v.serr:(v.boot?'lancé, sans battement':(v.err?'erreur : '+v.err:(v.ok?'lancé, aucun signe':(v.step||'arrêté')))));document.getElementById('ram').textContent=fg(d.ram_avail)+' / '+fg(d.ram_total)+' Go libres';document.getElementById('jm').textContent='Julia '+fg(d.julia)+' Go';document.getElementById('tmp').textContent=(d.temp!=null?Math.round(d.temp)+' °C':'-')+(d.thermal?' · '+d.thermal:'')}).catch(function(){})}
+function sys(){fetch('/api/sys').then(function(r){return r.json()}).then(function(d){var v=d.svc||{};document.getElementById('svc').textContent=(v.age!=null&&v.age<20)?'actif':(v.serr?'service en erreur : '+v.serr:(v.boot?'lancé, sans battement':(v.err?'erreur : '+v.err:(v.ok?'lancé, aucun signe':(v.step||'arrêté')))));document.getElementById('ram').textContent=fg(d.ram_avail)+' / '+fg(d.ram_total)+' Go libres';document.getElementById('jm').textContent='Julia '+fg(d.julia)+' Go';document.getElementById('tmp').textContent=(d.temp!=null?Math.round(d.temp)+' °C':'-')+(d.thermal?' · '+d.thermal:'')}).catch(function(){})}
 setInterval(sys,4000);sys();
 })();
 </script>

@@ -1,5 +1,5 @@
 # Popup flottant de Julia : petit visage affiche quand l'appli n'est plus au premier plan
-import os, time, traceback
+import os, time, traceback, threading
 
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
 STATE = {'s': 'init'}
@@ -17,11 +17,12 @@ def _why():
 
 HTML_T = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <body style="margin:0;background:transparent;overflow:hidden">
-<div id=f style="width:100vw;height:100vh;background:#000;border-radius:18px;border:1px solid #3a2f12;box-sizing:border-box"></div>
+<div id=f style="width:100vw;height:100vh;background:#000;border-radius:12px;border:1px solid #3a2f12;box-sizing:border-box"></div>
 <script>%JS%</script>
-<script>var F=JuliaFace.mount(document.getElementById('f'));F.setHue(%HUE%);</script>"""
+<script>var F=JuliaFace.mount(document.getElementById('f'));F.setHue(%HUE%);
+var _s='idle';function pop(s){if(s===_s)return;_s=s;if(s==='listening'){F.setExpression('surprised',120);setTimeout(function(){F.clearExpression()},650)}F.setState(s)}</script>"""
 
-POP_W = 100  # largeur du popup en dp (la hauteur suit)
+POP_W = 56  # largeur du popup en dp (la hauteur suit)
 
 def _html():
     js = ''
@@ -30,7 +31,33 @@ def _html():
         js = open(os.path.join(base, 'web', 'julia_visage.js'), encoding='utf-8').read()
     except Exception:
         STATE['s'] = 'julia_visage.js absent'
-    return HTML_T.replace('%JS%', js).replace('%HUE%', '42')
+    return HTML_T.replace('%JS%', js).replace('%HUE%', '265')
+
+
+def _signal(mem):
+    """État de Julia vu depuis le service : idle | listening | thinking | speaking.
+    Lit /api/gen de l'appli (réflexion, réponse) et le dernier réveil des oreilles."""
+    now = time.time()
+    try:
+        import json, urllib.request
+        g = json.loads(urllib.request.urlopen('http://127.0.0.1:5000/api/gen', timeout=0.8).read())
+        gid = g.get('id') or 0
+        if gid and not g.get('done'):
+            mem['gid'], mem['until'] = gid, 0
+            return 'speaking' if (g.get('text') or '').strip() else 'thinking'
+        if gid and gid == mem.get('gid') and not mem.get('until'):
+            mem['until'] = now + max(2.5, len(g.get('text') or '') * 0.07)   # même durée que l'interface
+        if mem.get('until', 0) > now:
+            return 'speaking'
+    except Exception:
+        pass
+    try:
+        import ears
+        if now - ears.STATE.get('last_wake', 0) < 8:
+            return 'listening'
+    except Exception:
+        pass
+    return 'idle'
 
 
 def err(txt):
@@ -160,6 +187,21 @@ def _run():
             if str(p.processName) == pkg:
                 return int(p.importance) <= 100
         return False
+
+    def sync():
+        mem, last = {}, None
+        while True:
+            try:
+                v = st['wv']
+                if v is not None:
+                    sig = _signal(mem)
+                    if sig != last or v is not st.get('sent'):
+                        last, st['sent'] = sig, v
+                        ui(lambda sig=sig, v=v: v.evaluateJavascript("pop('%s')" % sig, None))
+            except Exception:
+                err('overlay sync: ' + traceback.format_exc())
+            time.sleep(0.6)
+    threading.Thread(target=sync, daemon=True).start()
 
     while True:
         try:
