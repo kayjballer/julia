@@ -1,5 +1,5 @@
 [app]
-title = Julia
+title = Niko
 package.name = julia
 package.domain = org.jacques
 source.dir = .
@@ -9,7 +9,7 @@ version = 0.1
 requirements = python3,plyer,pyjnius,android,sqlite3,certifi
 orientation = portrait
 fullscreen = 1
-android.permissions = INTERNET,RECORD_AUDIO,com.android.alarm.permission.SET_ALARM,QUERY_ALL_PACKAGES,READ_CONTACTS,com.android.permission.GET_INSTALLED_APPS,FOREGROUND_SERVICE,FOREGROUND_SERVICE_MICROPHONE,SYSTEM_ALERT_WINDOW,VIBRATE,POST_NOTIFICATIONS
+android.permissions = INTERNET,RECORD_AUDIO,com.android.alarm.permission.SET_ALARM,QUERY_ALL_PACKAGES,READ_CONTACTS,com.android.permission.GET_INSTALLED_APPS,FOREGROUND_SERVICE,FOREGROUND_SERVICE_MICROPHONE,VIBRATE,POST_NOTIFICATIONS
 android.api = 33
 android.minapi = 24
 android.archs = arm64-v8a
