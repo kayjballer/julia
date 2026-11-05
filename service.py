@@ -107,20 +107,24 @@ def guard():
                         G['last_emb'] = now
                         G['th2'] = threading.Thread(target=brain.start_emb, daemon=True)
                         G['th2'].start()
-                if up and os.path.exists(brain.WH_MODEL):
+                if up:
                     wdown = (not llama_pid(8083, b'whisper_server')) and (not brain.wh_alive())
-                    G['wh'] = 'arret' if wdown else 'actif'
+                    wst, werr = brain.WH.get('stage'), str(brain.WH.get('err') or '')[:40]
+                    if not wdown:
+                        G['wh'] = 'actif'
+                    elif wst == 'download':
+                        G['wh'] = 'telechargement %d%%' % brain.WH.get('pct', 0) + (' [' + werr + ']' if werr else '')
+                    elif wst == 'start':
+                        G['wh'] = 'demarrage'
+                    elif wst == 'error':
+                        G['wh'] = 'erreur ' + werr
+                    else:
+                        G['wh'] = 'arret'
                     G['miss_wh'] = G['miss_wh'] + 1 if wdown else 0
                     if G['miss_wh'] >= 2 and (G['th3'] is None or not G['th3'].is_alive()) and now - G['last_wh'] > 60:
                         G['last_wh'] = now
                         G['th3'] = threading.Thread(target=brain.ensure_wh, daemon=True)
                         G['th3'].start()
-                elif up and brain.WH.get('stage') == 'error':
-                    G['wh'] = 'erreur ' + str(brain.WH.get('err'))[:50]
-                elif up and brain.WH.get('stage') in ('download', 'start'):
-                    G['wh'] = ('telechargement %d%%' % brain.WH.get('pct', 0)) if brain.WH.get('stage') == 'download' else 'demarrage'
-                    if brain.WH.get('err'):
-                        G['wh'] += ' [' + str(brain.WH.get('err'))[:40] + ']'
             pop = OV.STATE['s'] if (OV is not None and hasattr(OV, 'STATE')) else 'absent'
             ear = ('oreilles: %s | reveils %d | micro %s | appli %s | entendu: "%s"' % (EARS.STATE['s'], EARS.STATE['wakes'], EARS.STATE.get('mic', ''), EARS.STATE.get('app', '?'), EARS.STATE['heard'])) if EARS is not None else 'oreilles: absent'
             w('service_info.txt', 'cerveau: %s | whisper: %s | popup: %s | %s' % (cerv, G['wh'], pop, ear))
