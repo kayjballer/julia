@@ -191,6 +191,44 @@ def _new_job(text):
     return j
 
 
+# ---------- « stop » : reconnu en direct, sur la fin de ce que tu dis ----------
+STOPW = re.compile(r"\b(?:stop|arrete(?: toi| de parler| de chercher| la recherche| ca| tout)?|tais toi|chut|ca suffit|silence|attends|attend|pause|ferme la|laisse tomber|annule(?: tout| la recherche)?|oublie(?: ca)?)\b")
+ALLW = re.compile(r"\b(?:laisse tomber|annule|oublie)\b")
+M = {'mute_r': 0.0}
+
+
+def _stop_tail(ws):
+    # None | 'stop' | 'all' : vrai seulement si Julia parle ou cherche, et si les derniers mots sont une commande d'arrêt
+    if not (_busy() or any(j['mode'] == 'stream' for j in J)):
+        return None
+    tail = ' '.join(ws.split()[-4:])
+    m = STOPW.search(tail)
+    if not m:
+        return None
+    now, vocab = time.time(), set()
+    for t, w, jn in SPOKEN:
+        if now - t < 25:
+            vocab |= w
+    if m.group(0).split()[0] in vocab:      # le mot vient de SA voix, pas de la tienne
+        return None
+    return 'all' if ALLW.search(tail) else 'stop'
+
+
+def _stop_now(text, conf, how, everything=False, mute=False):
+    # elle se tait, la recherche en cours est annulée (les travaux de fond restent, sauf « annule tout »)
+    _log(text, conf, how)
+    _cut()
+    for j in list(J):
+        if everything or (j['mode'] == 'stream' and j['spoken'] == 0):
+            _kill(j)
+    S['buf'], S['buf_conf'] = [], []
+    if 'buf_wav' in S:
+        S['buf_wav'] = []
+    S.update(phase='listening', user=text, reply='', last=time.time())
+    if mute:
+        M['mute_r'] = time.time() + 4      # le reste de la phrase (qui contient « stop ») sera ignoré
+
+
 # ---------- événements des oreilles ----------
 def ear(kind, text, wake=False, conf=None, wav=''):
     text = (text or '').strip()
@@ -204,6 +242,14 @@ def ear(kind, text, wake=False, conf=None, wav=''):
                 _start(text)
             return state()
         ws = ' '.join(norm(text))
+        if now < M['mute_r'] and not wake:          # fin de la phrase qui contenait « stop » : on l'ignore
+            if kind == 'R':
+                M['mute_r'] = 0.0
+            return state()
+        tail = _stop_tail(ws)
+        if tail:
+            _stop_now(text, conf, 'stop entendu (%s)' % kind, everything=(tail == 'all'), mute=(kind == 'P'))
+            return state()
         stop = bool(STOP.match(ws) or CANCEL.match(ws))
         speaking = _busy()
         # Julia ne doit jamais se répondre à elle-même : le micro entend sa propre voix
@@ -391,9 +437,7 @@ def _request(text, conf=None):
         S.update(phase='listening', user=text, reply='')
         return
     if STOP.match(ws):
-        _log(text, conf, 'stop')
-        _cut()
-        S.update(phase='listening', user=text)
+        _stop_now(text, conf, 'stop')
         return
     if BYE.search(ws) and len(ws.split()) <= 6:
         S.update(user=text, reply='')
