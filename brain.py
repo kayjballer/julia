@@ -23,7 +23,7 @@ EMB_MODEL = os.path.join(DATA, 'models', 'qwen3-emb-q4.gguf')
 EMB_LOG = os.path.join(DATA, 'emb.log')
 WH_PORT = 8083
 WH = {'stage': 'off', 'pct': 0, 'err': ''}
-WH_FILE = 'ggml-small-q5_1.bin'
+WH_FILE = 'ggml-base-q5_1.bin'
 WH_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/' + WH_FILE
 WH_MODEL = os.path.join(DATA, 'models', WH_FILE)
 WH_LOG = os.path.join(DATA, 'whisper.log')
@@ -215,7 +215,7 @@ def wh_alive():
 
 
 def wh_model():
-    if os.path.exists(WH_MODEL) and os.path.getsize(WH_MODEL) > 100000000:
+    if os.path.exists(WH_MODEL) and os.path.getsize(WH_MODEL) > 30000000:
         return WH_MODEL
     r = urllib.request.urlopen(urllib.request.Request(WH_URL, headers={'Range': 'bytes=0-0'}), timeout=30, context=ctx())
     size = int(r.headers['Content-Range'].split('/')[-1])
