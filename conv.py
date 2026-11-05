@@ -252,6 +252,16 @@ def ear(kind, text, wake=False, conf=None, wav=''):
             return state()
         stop = bool(STOP.match(ws) or CANCEL.match(ws))
         speaking = _busy()
+        # « Julia » avant chaque demande : sans ce mot, on n'écoute que dans la fenêtre de suite
+        # (juste après le réveil ou après sa réponse), jamais pendant qu'elle cherche ou parle
+        if not stop and not wake and not WAKE.match(text):
+            if speaking or J or now - max(S['tts_end'], S.get('wake_t', 0.0), S.get('acc_t', 0.0)) > IDLE_S:
+                if kind == 'R':
+                    _log(text, conf, 'ignoré : sans « Julia »')
+                return state()
+        S['acc_t'] = now
+        if WAKE.match(text):
+            S['wake_t'] = now
         # Julia ne doit jamais se répondre à elle-même : le micro entend sa propre voix
         if not stop:
             if speaking:
@@ -376,7 +386,7 @@ def _flush():
 
 
 def _start(text=''):
-    S.update(active=True, phase='listening', user='', reply='', last=time.time(), err='')
+    S.update(active=True, phase='listening', user='', reply='', last=time.time(), err='', wake_t=time.time())
     S['wakes'] += 1
     rest = WAKE.sub('', text).strip() if text else ''
     if len(norm(rest)) >= 2:
