@@ -8,7 +8,8 @@ MODELS = os.path.join(DATA, 'models')
 ZIP = os.path.join(MODELS, 'vosk-model-small-fr-0.22.zip')
 DIR = os.path.join(MODELS, 'vosk-model-small-fr-0.22')
 URL = 'https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip'
-STATE = {'s': 'init', 'wakes': 0, 'heard': '', 'last_wake': 0.0, 'mic': '', 'app': '?', 'conv': False, 'hf': True, 'mode': 'precis', 'mode_now': ''}
+STATE = {'s': 'init', 'wakes': 0, 'heard': '', 'last_wake': 0.0, 'mic': '', 'app': '?', 'conv': False, 'hf': True, 'mode': 'precis', 'mode_now': '', 'cap': False, 'wav': ''}
+SEGDIR = os.path.join(DATA, 'seg')
 
 NAME = r'(julia|julie|giulia|jolie|joulia)'
 WAKE = re.compile(r'\b(dis|salut|ok|okay|hey|hé|eh|oh|bonjour)\s+' + NAME + r'\b')
@@ -93,7 +94,7 @@ def _sender():
     last_relaunch = 0.0
     while True:
         try:
-            kind, text, wake, conf = Q.get(timeout=0.5)
+            kind, text, wake, conf, wav = Q.get(timeout=0.5)
         except queue.Empty:
             try:   # l'appli dit si une conversation est ouverte (ouverte aussi par le bouton micro)
                 d = json.loads(urllib.request.urlopen(APP + '/api/conv', timeout=1.5).read())
@@ -102,7 +103,7 @@ def _sender():
                 STATE['app'] = 'injoignable'
             continue
         try:
-            d = _post('/api/conv/ear', {'kind': kind, 'text': text, 'wake': wake, 'conf': conf})
+            d = _post('/api/conv/ear', {'kind': kind, 'text': text, 'wake': wake, 'conf': conf, 'wav': wav})
             STATE['conv'], STATE['hf'], STATE['app'], STATE['mode'] = bool(d.get('active')), bool(d.get('hf', 1)), 'ok', d.get('mic') or STATE['mode']
         except Exception:
             STATE['app'] = 'injoignable'
@@ -111,9 +112,9 @@ def _sender():
                 _relaunch()
 
 
-def _forward(kind, text, wake, conf=None):
+def _forward(kind, text, wake, conf=None, wav=''):
     try:
-        Q.put_nowait((kind, text, wake, conf))
+        Q.put_nowait((kind, text, wake, conf, wav))
     except queue.Full:
         pass
 
@@ -127,6 +128,11 @@ def run():
             return
         STATE['s'] = 'demarrage micro'
         STATE['mode_now'] = STATE['mode']
+        try:
+            os.makedirs(SEGDIR, exist_ok=True)
+            Ears.setDir(SEGDIR)
+        except Exception:
+            pass
         r = str(Ears.start(DIR, '', STATE['mode_now']))
         if r != 'ok':
             STATE['s'] = r[:90]
@@ -138,6 +144,13 @@ def run():
             pass
         threading.Thread(target=_sender, daemon=True).start()
         while True:
+            cap = bool(STATE['conv']) or (time.time() - STATE['last_wake'] < 10)   # on garde l'audio des phrases pour Whisper
+            if cap != STATE['cap']:
+                STATE['cap'] = cap
+                try:
+                    Ears.setCapture(cap)
+                except Exception:
+                    pass
             if STATE['mode'] != STATE['mode_now']:      # changement « Précis / Anti-écho » depuis Contrôle
                 STATE['mode_now'] = STATE['mode']
                 Ears.stop()
@@ -160,6 +173,9 @@ def run():
             if kind == 'E':
                 STATE['s'] = 'erreur micro: ' + str(d.get('err', ''))[:70]
                 continue
+            if kind == 'W':
+                STATE['wav'] = str(d.get('path', ''))
+                continue
             t = (d.get('text') or d.get('partial') or '').strip().lower()
             if t:
                 STATE['heard'] = t[-40:]
@@ -175,7 +191,10 @@ def run():
                 cs = [w.get('conf') for w in (d.get('result') or []) if isinstance(w, dict) and w.get('conf') is not None]
                 if cs:
                     conf = sum(cs) / len(cs)
+            wav = ''
+            if kind == 'R':
+                wav, STATE['wav'] = STATE['wav'], ''
             if kind in ('P', 'R') and t and (wake or STATE['conv']):
-                _forward(kind, t, wake, conf)
+                _forward(kind, t, wake, conf, wav)
     except Exception as e:
         STATE['s'] = ('erreur: ' + type(e).__name__ + ' ' + str(e))[:110]

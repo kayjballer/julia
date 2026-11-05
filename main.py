@@ -1797,7 +1797,7 @@ class H(SimpleHTTPRequestHandler):
             return self._json({'ok': True})
         if self.path.startswith('/api/conv') and conv:
             if self.path == '/api/conv/ear':
-                return self._json(conv.ear(str(data.get('kind', 'P')), str(data.get('text', '')), bool(data.get('wake')), data.get('conf')))
+                return self._json(conv.ear(str(data.get('kind', 'P')), str(data.get('text', '')), bool(data.get('wake')), data.get('conf'), str(data.get('wav') or '')))
             if self.path == '/api/conv/start':
                 return self._json(conv.start())
             if self.path == '/api/conv/end':

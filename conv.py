@@ -6,14 +6,14 @@
 #   - un travail terminé pendant que tu parles d'autre chose attend un moment calme, puis Julia l'annonce
 #   - tu parles pendant qu'elle parle -> elle se tait tout de suite et t'écoute
 #   - sa propre voix captée par le micro est reconnue et ignorée
-import re, time, threading, unicodedata, collections, difflib
+import re, time, threading, unicodedata, collections, difflib, io, json, wave, urllib.request
 
 CFG = {'lang': 'FR', 'mem': 1, 'web': 1, 'rate': 1.0, 'pitch': 1.0, 'vname': '', 'tz': 0, 'hf': 1,
-       'pause': 'normale', 'conf': 0.45, 'mic': 'precis', 'barge': 0}
-PAUSE = {'courte': 0.8, 'normale': 1.3, 'longue': 2.0}   # silence attendu avant d'envoyer la phrase au cerveau
+       'pause': 'courte', 'conf': 0.45, 'mic': 'precis', 'barge': 0, 'asr': 1}
+PAUSE = {'vive': 0.55, 'courte': 0.8, 'normale': 1.3, 'longue': 2.0}   # silence attendu avant d'envoyer la phrase au cerveau
 S = {'active': False, 'phase': 'idle', 'user': '', 'reply': '', 'last': 0.0, 'wakes': 0,
      'ears': 0.0, 'say_t': 0.0, 'tts_end': 0.0, 'was_busy': False, 'cuts': 0, 'err': '',
-     'buf': [], 'buf_conf': [], 'buf_t': 0.0, 'rep': 0, 'acks': 0, 'last_req': ('', 0.0)}
+     'buf': [], 'buf_conf': [], 'buf_wav': [], 'asr': 0, 'buf_t': 0.0, 'rep': 0, 'acks': 0, 'last_req': ('', 0.0)}
 J = []            # travaux : {'jid','q','mode','spoken','filler','t0','st','lead','text','queued','data'}
 MAX_PAR = 2       # le serveur llama a 2 emplacements
 JOURNAL = collections.deque(maxlen=14)
@@ -50,7 +50,7 @@ def set_cfg(d):
         CFG['pause'] = d['pause']
     if d.get('mic') in ('precis', 'antiecho'):
         CFG['mic'] = d['mic']
-    for k in ('mem', 'web', 'hf', 'barge'):
+    for k in ('mem', 'web', 'hf', 'barge', 'asr'):
         if k in d:
             CFG[k] = 1 if d[k] else 0
     for k in ('rate', 'pitch'):
@@ -192,7 +192,7 @@ def _new_job(text):
 
 
 # ---------- événements des oreilles ----------
-def ear(kind, text, wake=False, conf=None):
+def ear(kind, text, wake=False, conf=None, wav=''):
     text = (text or '').strip()
     now = time.time()
     S['ears'] = now
@@ -228,15 +228,89 @@ def ear(kind, text, wake=False, conf=None):
             S['user'] = (' '.join(S['buf']) + ' ' + text).strip()
         elif kind == 'R':
             if stop or (BYE.search(ws) and len(ws.split()) <= 6):
-                S['buf'], S['buf_conf'] = [], []
+                S['buf'], S['buf_conf'], S['buf_wav'] = [], [], []
                 _request(text, conf)
             else:
                 # Vosk coupe à la moindre pause : on recolle les morceaux jusqu'à un vrai silence
                 S['buf'].append(text)
                 S['buf_conf'].append(conf)
+                if wav and wav.endswith('.wav') and '/seg/seg_' in wav:
+                    S['buf_wav'].append(wav)
                 S['buf_t'] = now
                 S['user'] = ' '.join(S['buf'])
     return state()
+
+
+# ---------- Whisper : retranscrit toute la phrase (audio recolle) au lieu du texte de Vosk ----------
+WH_URL = 'http://127.0.0.1:8083/inference'
+HALLU = re.compile(r"sous[- ]?titr|amara\.org|merci d'avoir (?:regard|suivi)", re.I)
+WAKE_P = re.compile(r"^\s*(?:(?:dis|salut|ok|okay|hey|hé|eh|oh|bonjour)[\s,.!?]+)?(?:julia|julie|giulia|jolie|joulia)\b[\s,.!?]*", re.I)
+
+
+def _wav_join(paths):
+    out, fmt = [], None
+    for p in paths:
+        try:
+            with wave.open(p, 'rb') as w:
+                f = (w.getnchannels(), w.getsampwidth(), w.getframerate())
+                if fmt is None:
+                    fmt = f
+                if f != fmt:
+                    continue
+                out.append(w.readframes(w.getnframes()))
+        except Exception:
+            continue
+    if not out:
+        return None
+    buf = io.BytesIO()
+    with wave.open(buf, 'wb') as w:
+        w.setnchannels(fmt[0])
+        w.setsampwidth(fmt[1])
+        w.setframerate(fmt[2])
+        w.writeframes((b'\x00\x00' * 3200).join(out))      # 0,2 s de silence entre deux morceaux
+    return buf.getvalue()
+
+
+def _asr(paths):
+    wav = _wav_join(paths)
+    if not wav:
+        return None
+    lang = (CFG['lang'] or 'fr')[:2].lower()
+    if not lang.isalpha():
+        lang = 'auto'
+    b = '----julia%d' % int(time.time() * 1000)
+    body = b''
+    for k, v in (('temperature', '0.0'), ('temperature_inc', '0.0'), ('response_format', 'json'), ('language', lang)):
+        body += ('--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (b, k, v)).encode()
+    body += ('--%s\r\nContent-Disposition: form-data; name="file"; filename="a.wav"\r\nContent-Type: audio/wav\r\n\r\n' % b).encode()
+    body += wav + ('\r\n--%s--\r\n' % b).encode()
+    req = urllib.request.Request(WH_URL, data=body, headers={'Content-Type': 'multipart/form-data; boundary=' + b})
+    d = json.loads(urllib.request.urlopen(req, timeout=25).read())
+    t = re.sub(r"[\[\(][^\]\)]*[\]\)]", ' ', d.get('text') or '')
+    t = ' '.join(t.split())
+    t = WAKE_P.sub('', t).strip()
+    if not t or HALLU.search(t):
+        return None
+    return t
+
+
+def _asr_request(text, conf, wavs):
+    t0, w = time.time(), None
+    try:
+        w = _asr(wavs)
+    except Exception as e:
+        S['err'] = ('whisper: ' + repr(e))[:80]
+    with L:
+        S['asr'] = max(0, S['asr'] - 1)
+        if not S['active']:
+            return
+        S['last'] = time.time()
+        if w:
+            _log(w, None, 'whisper %.1fs' % (time.time() - t0))
+            _request(w, None)
+        else:
+            _log(text, conf, 'whisper indisponible : texte Vosk')
+            _request(text, conf)
 
 
 def _flush():
@@ -245,7 +319,13 @@ def _flush():
     text = ' '.join(S['buf'])
     cs = [x for x in S['buf_conf'] if x is not None]
     conf = (sum(cs) / len(cs)) if cs else None
-    S['buf'], S['buf_conf'] = [], []
+    wavs = S['buf_wav']
+    S['buf'], S['buf_conf'], S['buf_wav'] = [], [], []
+    if CFG['asr'] and wavs:
+        S['asr'] += 1
+        S.update(phase='thinking', user=text)
+        threading.Thread(target=_asr_request, args=(text, conf, wavs), daemon=True).start()
+        return
     _request(text, conf)
 
 
@@ -265,7 +345,7 @@ def start():
 
 def end(say_bye=False):
     with L:
-        S.update(active=False, phase='idle', buf=[], buf_conf=[])
+        S.update(active=False, phase='idle', buf=[], buf_conf=[], buf_wav=[])
         try:
             H['stop']()
         except Exception:
@@ -380,7 +460,7 @@ def _speak_new(j, st):
 def _quiet():
     # moment calme : il ne parle pas, elle ne parle pas
     now = time.time()
-    return (not S['buf']) and now - S['buf_t'] > 1.0 and now - S['last'] > 1.2 and not _tail()
+    return (not S['buf']) and not S['asr'] and now - S['buf_t'] > 1.0 and now - S['last'] > 1.2 and not _tail()
 
 
 def _tick():
@@ -434,7 +514,7 @@ def _loop():
             S['was_busy'] = b
             with L:
                 if not S['active']:
-                    S['buf'], S['buf_conf'] = [], []
+                    S['buf'], S['buf_conf'], S['buf_wav'] = [], [], []
                     if J:
                         for j in list(J):
                             _kill(j)
@@ -444,12 +524,12 @@ def _loop():
                     _tick()
                     if b:
                         S['phase'] = 'speaking'
-                    elif any(j['mode'] == 'stream' and j['st'] != 'prête' for j in J):
+                    elif S['asr'] or any(j['mode'] == 'stream' and j['st'] != 'prête' for j in J):
                         S['phase'] = 'thinking'
                     else:
                         S['phase'] = 'listening'
                     # la conversation reste ouverte tant qu'un travail tourne ou qu'on parle
-                    if not J and not b and not S['buf'] and now - S['last'] > IDLE_S:
+                    if not J and not b and not S['buf'] and not S['asr'] and now - S['last'] > IDLE_S:
                         S.update(active=False, phase='idle')
                     elif J:
                         S['last'] = max(S['last'], now - 5)

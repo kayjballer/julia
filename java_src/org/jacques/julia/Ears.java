@@ -7,6 +7,10 @@ import android.media.audiofx.AcousticEchoCanceler;
 import org.vosk.Model;
 import org.vosk.Recognizer;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 /* Oreilles de Julia : écoute le micro en continu avec Vosk et dépose les résultats dans une file
    que Python lit avec poll() (jamais de rappel vers Python : plus sûr).
@@ -20,6 +24,56 @@ public class Ears {
     private static AudioRecord ar = null;
     private static AcousticEchoCanceler aec = null;
     private static String infoTxt = "";
+
+    /* audio de la phrase en cours, pour Whisper : 0,6 s avant la parole + la parole (25 s max) */
+    private static final int PRE = 9600;
+    private static final int MAXS = 16000 * 25;
+    private static short[] seg = new short[MAXS + 4096];
+    private static int segN = 0;
+    private static int segId = 0;
+    private static boolean inSeg = false;
+    private static volatile boolean cap = false;
+    private static String dir = "";
+
+    public static void setDir(String d) {
+        dir = d == null ? "" : d;
+        try { new File(dir).mkdirs(); } catch (Throwable t) { }
+    }
+
+    public static void setCapture(boolean b) {
+        cap = b;
+    }
+
+    private static void add(short[] b, int n) {
+        if (!inSeg && segN + n > PRE) {
+            int keep = Math.max(0, PRE - n);
+            if (segN > keep) { System.arraycopy(seg, segN - keep, seg, 0, keep); segN = keep; }
+        }
+        if (segN + n > seg.length) n = seg.length - segN;
+        if (n > 0) { System.arraycopy(b, 0, seg, segN, n); segN += n; }
+    }
+
+    private static boolean hasText(String r) {
+        return r != null && !r.replaceAll("\\s", "").contains("\"text\":\"\"");
+    }
+
+    private static String dump() {
+        try {
+            String path = dir + "/seg_" + (segId++ % 16) + ".wav";
+            int bytes = segN * 2;
+            ByteBuffer bb = ByteBuffer.allocate(44 + bytes).order(ByteOrder.LITTLE_ENDIAN);
+            bb.put("RIFF".getBytes()); bb.putInt(36 + bytes); bb.put("WAVE".getBytes()); bb.put("fmt ".getBytes());
+            bb.putInt(16); bb.putShort((short) 1); bb.putShort((short) 1); bb.putInt(16000); bb.putInt(32000);
+            bb.putShort((short) 2); bb.putShort((short) 16); bb.put("data".getBytes()); bb.putInt(bytes);
+            for (int i = 0; i < segN; i++) bb.putShort(seg[i]);
+            FileOutputStream f = new FileOutputStream(path);
+            f.write(bb.array());
+            f.close();
+            return path;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
 
     private static AudioRecord open(int source, int buf) {
         AudioRecord r = new AudioRecord(source, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, buf);
@@ -85,13 +139,22 @@ public class Ears {
                                 if (n < 0) { if (run) push("E", "{\"err\":\"lecture micro " + n + "\"}"); break; }
                                 continue;
                             }
+                            add(b, n);
                             if (rec.acceptWaveForm(b, n)) {
                                 lastPartial = "";
-                                push("R", rec.getResult());
+                                String res = rec.getResult();
+                                if (cap && dir.length() > 0 && segN > 3200 && hasText(res)) {
+                                    String wp = dump();
+                                    if (wp != null) push("W", "{\"path\":\"" + wp + "\"}");
+                                }
+                                inSeg = false;
+                                segN = 0;
+                                push("R", res);
                             } else {
                                 String p = rec.getPartialResult();
                                 if (p != null && !p.equals(lastPartial)) {
                                     lastPartial = p;
+                                    if (!p.replaceAll("\\s", "").equals("{\"partial\":\"\"}")) inSeg = true;
                                     push("P", p);
                                 }
                             }
@@ -118,6 +181,7 @@ public class Ears {
         try { if (aec != null) aec.release(); } catch (Throwable t) { }
         try { if (model != null) model.close(); } catch (Throwable t) { }
         ar = null; aec = null; model = null; th = null;
+        inSeg = false; segN = 0;
     }
 
     public static String poll() {

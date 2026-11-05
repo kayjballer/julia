@@ -46,7 +46,7 @@ except Exception:
     EARS = None
     w('service_err.txt', 'ears: ' + traceback.format_exc()[-250:])
 
-def llama_pid(port):
+def llama_pid(port, name=b'llama_server'):
     tok = b'\x00%d\x00' % port
     try:
         for p in os.listdir('/proc'):
@@ -56,7 +56,7 @@ def llama_pid(port):
                 c = open('/proc/%s/cmdline' % p, 'rb').read()
             except Exception:
                 continue
-            if b'llama_server' in c and tok in c + b'\x00':
+            if name in c and tok in c + b'\x00':
                 return int(p)
     except Exception:
         pass
@@ -74,7 +74,7 @@ def model_ready():
     except Exception:
         return False
 
-G = {'th': None, 'th2': None, 'miss_emb': 0, 'last_llm': 0, 'last_emb': 0}
+G = {'th': None, 'th2': None, 'th3': None, 'miss_emb': 0, 'miss_wh': 0, 'last_llm': 0, 'last_emb': 0, 'last_wh': 0, 'wh': 'attend'}
 
 def guard():
     while True:
@@ -107,9 +107,19 @@ def guard():
                         G['last_emb'] = now
                         G['th2'] = threading.Thread(target=brain.start_emb, daemon=True)
                         G['th2'].start()
+                if up and os.path.exists(brain.WH_MODEL):
+                    wdown = (not llama_pid(8083, b'whisper_server')) and (not brain.wh_alive())
+                    G['wh'] = 'arret' if wdown else 'actif'
+                    G['miss_wh'] = G['miss_wh'] + 1 if wdown else 0
+                    if G['miss_wh'] >= 2 and (G['th3'] is None or not G['th3'].is_alive()) and now - G['last_wh'] > 60:
+                        G['last_wh'] = now
+                        G['th3'] = threading.Thread(target=brain.ensure_wh, daemon=True)
+                        G['th3'].start()
+                elif up and brain.WH.get('stage') == 'error':
+                    G['wh'] = 'erreur ' + str(brain.WH.get('err'))[:50]
             pop = OV.STATE['s'] if (OV is not None and hasattr(OV, 'STATE')) else 'absent'
             ear = ('oreilles: %s | reveils %d | micro %s | appli %s | entendu: "%s"' % (EARS.STATE['s'], EARS.STATE['wakes'], EARS.STATE.get('mic', ''), EARS.STATE.get('app', '?'), EARS.STATE['heard'])) if EARS is not None else 'oreilles: absent'
-            w('service_info.txt', 'cerveau: %s | popup: %s | %s' % (cerv, pop, ear))
+            w('service_info.txt', 'cerveau: %s | whisper: %s | popup: %s | %s' % (cerv, G['wh'], pop, ear))
         except Exception:
             w('service_err.txt', traceback.format_exc()[-300:])
         time.sleep(5)
