@@ -20,7 +20,7 @@ JOURNAL = collections.deque(maxlen=14)
 H = {}
 L = threading.RLock()
 SPOKEN = collections.deque(maxlen=40)   # (heure, mots) des phrases dites : sert à reconnaitre l'écho
-IDLE_S = 30.0
+IDLE_S = 5.0
 
 WAKE = re.compile(r"^\s*(?:(?:dis|salut|ok|okay|hey|hé|eh|oh|bonjour)\s+)?(?:julia|julie|giulia|jolie|joulia)\b[\s,.!?]*", re.I)
 STOP = re.compile(r"^(?:ok |bon |oui )?(?:julia )?(?:stop|arrete|arrete toi|tais toi|chut|attends|attend|ca suffit|silence|pause)(?: julia)?$")
@@ -573,7 +573,7 @@ def _loop():
                     else:
                         S['phase'] = 'listening'
                     # la conversation reste ouverte tant qu'un travail tourne ou qu'on parle
-                    if not J and not b and not S['buf'] and not S['asr'] and now - S['last'] > IDLE_S:
+                    if not J and not b and not S['buf'] and not S['asr'] and now - max(S['last'], S['tts_end']) > IDLE_S:
                         S.update(active=False, phase='idle')
                     elif J:
                         S['last'] = max(S['last'], now - 5)
