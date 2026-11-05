@@ -117,6 +117,10 @@ def guard():
                         G['th3'].start()
                 elif up and brain.WH.get('stage') == 'error':
                     G['wh'] = 'erreur ' + str(brain.WH.get('err'))[:50]
+                elif up and brain.WH.get('stage') in ('download', 'start'):
+                    G['wh'] = ('telechargement %d%%' % brain.WH.get('pct', 0)) if brain.WH.get('stage') == 'download' else 'demarrage'
+                    if brain.WH.get('err'):
+                        G['wh'] += ' [' + str(brain.WH.get('err'))[:40] + ']'
             pop = OV.STATE['s'] if (OV is not None and hasattr(OV, 'STATE')) else 'absent'
             ear = ('oreilles: %s | reveils %d | micro %s | appli %s | entendu: "%s"' % (EARS.STATE['s'], EARS.STATE['wakes'], EARS.STATE.get('mic', ''), EARS.STATE.get('app', '?'), EARS.STATE['heard'])) if EARS is not None else 'oreilles: absent'
             w('service_info.txt', 'cerveau: %s | whisper: %s | popup: %s | %s' % (cerv, G['wh'], pop, ear))
