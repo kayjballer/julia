@@ -1,5 +1,6 @@
 # Service Niko : tourne en continu. Micro -> Whisper -> (mot "Niko") -> Qwen -> voix.
 import os, time, json, re, threading, traceback, unicodedata, urllib.request
+import router
 os.environ['JULIA_SVC'] = '1'
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
 
@@ -418,6 +419,7 @@ def handle(path):
         settle(False)
         return
     try:
+        log('role: ' + router.role(cmd))
         _, spoken = ask(cmd)
     except Exception:
         log('qwen: ' + traceback.format_exc()[-200:])
