@@ -288,8 +288,7 @@ def ensure_wh():
 
 
 def start_emb():
-    threading.Thread(target=ensure_wh, daemon=True).start()
-    threading.Thread(target=ensure_emb, daemon=True).start()
+    threading.Thread(target=ensure_wh, daemon=True).start()   # Niko : plus de serveur d'embeddings
 
 
 def ensure():
