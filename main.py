@@ -62,6 +62,26 @@ def read_state():
         return {'phase': 'demarrage', 'awake': False, 'level': 0.0, 'heard': '', 'said': '', 'status': 'demarrage'}
 
 
+def tail(name, n=25):
+    try:
+        return ''.join(open(os.path.join(DATA, name), encoding='utf-8', errors='replace').readlines()[-n:]).strip()
+    except Exception:
+        return '(vide)'
+
+
+def debug_text():
+    st = read_state()
+    return '\n'.join([
+        'phase: %s | eveille: %s | volume: %.3f' % (st.get('phase'), st.get('awake'), st.get('level') or 0),
+        'micro: %s' % st.get('mic', ''),
+        'stats: %s' % st.get('stats', ''),
+        'statut: %s' % st.get('status', ''),
+        '--- service_info', tail('service_info.txt', 3),
+        '--- service_err', tail('service_err.txt', 6),
+        '--- niko.log', tail('niko.log', 30),
+        '--- main.log', tail('main.log', 8)])
+
+
 class H(SimpleHTTPRequestHandler):
     def __init__(self, *a, **k):
         super().__init__(*a, directory=BASE, **k)
@@ -83,6 +103,14 @@ class H(SimpleHTTPRequestHandler):
             b = json.dumps(st).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
+        if self.path.split('?')[0] == '/api/debug':
+            b = debug_text().encode('utf-8', 'replace')
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
             self.send_header('Content-Length', str(len(b)))
             self.end_headers()
             self.wfile.write(b)

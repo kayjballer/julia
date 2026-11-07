@@ -33,6 +33,9 @@ public class Ears {
     private static volatile boolean muted = false;
     private static volatile long muteUntil = 0;
     private static volatile float lvl = 0f;
+    private static volatile float peak = 0f;
+    private static volatile float noiseEst = 0f;
+    private static volatile int segs = 0;
     private static String dir = "";
     private static String infoTxt = "";
 
@@ -118,8 +121,10 @@ public class Ears {
                                 continue;
                             }
 
-                            float thrStart = Math.max(0.012f, noise * 3.5f);
-                            float thrStay = Math.max(0.008f, noise * 2.2f);
+                            float thrStart = Math.max(0.007f, noise * 3.0f);
+                            float thrStay = Math.max(0.005f, noise * 2.0f);
+                            noiseEst = noise;
+                            if (rms > peak) peak = rms;
                             if (!inSeg) {
                                 add(b, n);
                                 noise = Math.max(0.002f, noise * 0.99f + rms * 0.01f);
@@ -132,7 +137,7 @@ public class Ears {
                                     boolean keep = voiced >= MIN_VOICED;
                                     String wp = keep ? dump() : null;
                                     inSeg = false; segN = 0; loud = 0; quiet = 0; voiced = 0;
-                                    if (wp != null) push("W", "{\"path\":\"" + wp + "\"}");
+                                    if (wp != null) { segs++; push("W", "{\"path\":\"" + wp + "\"}"); }
                                 }
                             }
                         }
@@ -168,6 +173,12 @@ public class Ears {
     public static float level() { return lvl; }
     public static String poll() { return Q.poll(); }
     public static String info() { return infoTxt; }
+
+    /* pour le diagnostic : volume max entendu, bruit de fond estimé, phrases découpées */
+    public static String stats() {
+        float p = peak; peak = 0f;
+        return String.format("vol max %.3f | bruit %.3f | phrases %d", p, noiseEst, segs);
+    }
 
     private static void push(String kind, String json) {
         if (Q.size() > 30) Q.poll();

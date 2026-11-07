@@ -14,39 +14,46 @@
   }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; background: var(--nuit); overflow: hidden; -webkit-tap-highlight-color: transparent; user-select: none; }
-  body {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
-    color: var(--texte); font-family: "Iowan Old Style", "Noto Serif", Georgia, serif;
-  }
-  #orbe { width: min(92vw, 62vh); aspect-ratio: 1; display: block; }
+  /* le canvas couvre tout l'écran : plus de carré, le halo se fond dans la nuit */
+  #orbe { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: var(--nuit); }
   #texte {
-    min-height: 7.5em; width: min(86vw, 30em); padding-top: 1.2rem;
-    text-align: center; font-size: 1.28rem; line-height: 1.5; letter-spacing: .005em;
-    transition: opacity .5s ease;
+    position: fixed; left: 50%; top: 67%; transform: translateX(-50%);
+    width: min(86vw, 30em); text-align: center;
+    color: var(--texte); font-family: "Iowan Old Style", "Noto Serif", Georgia, serif;
+    font-size: 1.28rem; line-height: 1.5; letter-spacing: .005em; pointer-events: none;
   }
   #texte .entendu { display: block; color: var(--discret); font-size: 1rem; font-style: italic; margin-bottom: .5rem; }
   #texte .dit { color: var(--voix); }
   #statut {
     position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom, 0px) + 1.1rem);
     text-align: center; font: .86rem/1.3 system-ui, sans-serif; color: var(--discret);
-    transition: opacity .6s ease; opacity: 0;
+    transition: opacity .6s ease; opacity: 0; pointer-events: none;
   }
   #statut.visible { opacity: 1; }
-  @media (prefers-reduced-motion: reduce) { #texte, #statut { transition: none; } }
+  #debug {
+    display: none; position: fixed; inset: 0; z-index: 10; overflow: auto; padding: 3rem .8rem 1rem;
+    background: rgba(7, 8, 13, .94); color: #cfd6e6; font: 11px/1.45 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word;
+  }
+  #debug.visible { display: block; }
+  @media (prefers-reduced-motion: reduce) { #statut { transition: none; } }
 </style>
 </head>
 <body>
-<canvas id="orbe" width="720" height="720"></canvas>
+<canvas id="orbe"></canvas>
 <div id="texte" aria-live="polite"></div>
 <div id="statut"></div>
+<div id="debug"></div>
 
 <script>
 /* ---- Orbe : une sphère éclairée dans un shader, déformée par la voix ---- */
 var VERT = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
 var FRAG = [
+'#ifdef GL_FRAGMENT_PRECISION_HIGH',
+'precision highp float;',
+'#else',
 'precision mediump float;',
-'uniform vec2 u_res; uniform float u_t; uniform float u_energy; uniform float u_calm; uniform vec3 u_col; uniform vec3 u_col2;',
+'#endif',
+'uniform vec2 u_c; uniform float u_R; uniform float u_t; uniform float u_energy; uniform float u_calm; uniform vec3 u_col; uniform vec3 u_col2;',
 'float h(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }',
 'float noise(vec3 x){',
 '  vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);',
@@ -54,15 +61,18 @@ var FRAG = [
 '             mix(mix(h(i + vec3(0,0,1)), h(i + vec3(1,0,1)), f.x), mix(h(i + vec3(0,1,1)), h(i + vec3(1,1,1)), f.x), f.y), f.z);',
 '}',
 'void main(){',
-'  vec2 uv = (gl_FragCoord.xy * 2.0 - u_res) / min(u_res.x, u_res.y);',
-'  float R = 0.62;',
-'  float r = length(uv) / R;',
-'  vec3 bg = vec3(0.027, 0.031, 0.051);',
-'  float halo = exp(-max(r - 1.0, 0.0) * (3.2 - u_energy * 1.6)) * (0.20 + 0.55 * u_energy + 0.12 * u_calm);',
-'  vec3 col = bg + u_col * halo * (r > 1.0 ? 1.0 : 0.0);',
-'  if (r < 1.0) {',
-'    float z = sqrt(1.0 - r * r);',
-'    vec3 n = vec3(uv / R, z);',
+'  vec2 p = (gl_FragCoord.xy - u_c) / u_R;',
+'  float r = length(p);',
+'  vec3 bg = vec3(0.0275, 0.0314, 0.0510);',
+/* halo : s'éteint avant les bords de l'écran (rayon max 1.64 < 1.66) */
+'  float ext = 0.50 + 0.14 * u_energy;',
+'  float halo = pow(clamp(1.0 - (max(r, 1.0) - 1.0) / ext, 0.0, 1.0), 2.4) * (0.22 + 0.50 * u_energy + 0.10 * u_calm);',
+'  vec3 col = bg + u_col * halo;',
+'  float aa = 1.6 / u_R;',
+'  float mask = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r);',
+'  if (mask > 0.0) {',
+'    float z = sqrt(max(1.0 - r * r, 0.0));',
+'    vec3 n = vec3(p, z);',
 '    float a = u_t * 0.18;',
 '    mat2 rot = mat2(cos(a), -sin(a), sin(a), cos(a));',
 '    vec3 q = n; q.xz = rot * q.xz;',
@@ -72,10 +82,12 @@ var FRAG = [
 '    float rim = pow(1.0 - z, 2.4);',
 '    float band = smoothstep(0.35, 0.8, w);',
 '    vec3 base = mix(u_col2, u_col, band);',
-'    col = base * (0.10 + 0.78 * diff) + u_col * rim * (0.55 + 0.9 * u_energy);',
-'    col += pow(diff, 14.0) * 0.28;',
-'    col = mix(col, col * 1.0 + 0.04, 0.0);',
+'    vec3 s = base * (0.10 + 0.78 * diff) + u_col * rim * (0.55 + 0.9 * u_energy);',
+'    s += pow(diff, 14.0) * 0.28;',
+'    col = mix(col, s, mask);',
 '  }',
+/* léger grain : évite les bandes dans les dégradés sombres */
+'  col += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;',
 '  gl_FragColor = vec4(col, 1.0);',
 '}'
 ].join('\n');
@@ -90,9 +102,10 @@ var ETATS = {
 };
 
 var canvas = document.getElementById('orbe');
-var gl = canvas.getContext('webgl', { antialias: true, alpha: false });
+var gl = canvas.getContext('webgl', { antialias: false, alpha: false, powerPreference: 'high-performance' });
 var cur = { c: ETATS.demarrage.c.slice(), d: ETATS.demarrage.d.slice(), e: 0.05, calm: 0 };
 var etat = 'demarrage', niveau = 0, eveille = false;
+var echelle = 0.75;            /* résolution de rendu : baisse toute seule si l'écran n'atteint pas ~60 images/s */
 
 function shader(type, src) {
   var s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
@@ -108,37 +121,62 @@ if (gl) {
     var buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
     var loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-    ['u_res','u_t','u_energy','u_calm','u_col','u_col2'].forEach(function(k){ U[k] = gl.getUniformLocation(prog, k); });
+    ['u_c','u_R','u_t','u_energy','u_calm','u_col','u_col2'].forEach(function(k){ U[k] = gl.getUniformLocation(prog, k); });
   } else { gl = null; }
 }
 var ctx2d = gl ? null : canvas.getContext('2d');
 
-function lerp(a, b, k) { return a + (b - a) * k; }
+function redimensionner() {
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var w = Math.max(2, Math.round(window.innerWidth * dpr * echelle));
+  var h = Math.max(2, Math.round(window.innerHeight * dpr * echelle));
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+}
+redimensionner();
+window.addEventListener('resize', redimensionner);
+
+function mixer(a, b, k) { return a + (b - a) * k; }
+
+var avant = 0, imgs = 0, duree = 0, t0 = 0;
 
 function dessiner(ms) {
-  var t = ms / 1000, but = ETATS[etat] || ETATS.veille;
-  var k = 0.06;
-  for (var i = 0; i < 3; i++) { cur.c[i] = lerp(cur.c[i], but.c[i], k); cur.d[i] = lerp(cur.d[i], but.d[i], k); }
+  if (!t0) t0 = ms;
+  var dt = Math.min(0.05, Math.max(0.001, (ms - (avant || ms)) / 1000)); avant = ms;
+  var t = (ms - t0) / 1000, but = ETATS[etat] || ETATS.veille;
+
+  /* lissages indépendants du nombre d'images par seconde */
+  var kc = 1 - Math.exp(-dt * 3.5), ke = 1 - Math.exp(-dt * 8), kq = 1 - Math.exp(-dt * 3);
+  for (var i = 0; i < 3; i++) { cur.c[i] = mixer(cur.c[i], but.c[i], kc); cur.d[i] = mixer(cur.d[i], but.d[i], kc); }
   var pouls = 0;
   if (etat === 'reflexion') pouls = 0.12 * (0.5 + 0.5 * Math.sin(t * 5));
   if (etat === 'parle') pouls = 0.18 * (0.5 + 0.5 * Math.sin(t * 9)) * (0.5 + niveau);
   var visee = but.e + pouls + (etat === 'ecoute' ? Math.min(niveau * 7, 0.5) : 0) + (etat === 'veille' && eveille ? 0.08 : 0);
-  cur.e = lerp(cur.e, visee, 0.12);
-  cur.calm = lerp(cur.calm, eveille ? 1 : 0, 0.05);
+  cur.e = mixer(cur.e, visee, ke);
+  cur.calm = mixer(cur.calm, eveille ? 1 : 0, kq);
+
+  var w = canvas.width, h = canvas.height;
+  var R = Math.min(w, h) * 0.30, cx = w / 2, cy = h * 0.60;      /* cy mesuré depuis le bas : l'orbe est dans le haut de l'écran */
   if (gl) {
-    var w = canvas.width, h = canvas.height;
     gl.viewport(0, 0, w, h);
-    gl.uniform2f(U.u_res, w, h); gl.uniform1f(U.u_t, t);
+    gl.uniform2f(U.u_c, cx, cy); gl.uniform1f(U.u_R, R); gl.uniform1f(U.u_t, t);
     gl.uniform1f(U.u_energy, cur.e); gl.uniform1f(U.u_calm, cur.calm);
     gl.uniform3f(U.u_col, cur.c[0], cur.c[1], cur.c[2]); gl.uniform3f(U.u_col2, cur.d[0], cur.d[1], cur.d[2]);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-  } else {
+  } else if (ctx2d) {
     /* repli sans WebGL : un dégradé radial qui respire */
-    var s = canvas.width, g = ctx2d.createRadialGradient(s*0.4, s*0.38, s*0.04, s/2, s/2, s*0.31*(1 + cur.e*0.12));
-    var C = function(v, m){ return 'rgb(' + Math.round(v[0]*255*m) + ',' + Math.round(v[1]*255*m) + ',' + Math.round(v[2]*255*m) + ')'; };
-    g.addColorStop(0, C(cur.c, 1)); g.addColorStop(1, C(cur.d, 1));
-    ctx2d.fillStyle = '#07080d'; ctx2d.fillRect(0, 0, s, s);
-    ctx2d.beginPath(); ctx2d.arc(s/2, s/2, s*0.31*(1 + cur.e*0.12), 0, 6.2832); ctx2d.fillStyle = g; ctx2d.fill();
+    var rr = R * (1 + cur.e * 0.12), y = h - cy;
+    var g = ctx2d.createRadialGradient(cx - rr * 0.25, y - rr * 0.28, rr * 0.08, cx, y, rr);
+    var C = function(v){ return 'rgb(' + Math.round(v[0]*255) + ',' + Math.round(v[1]*255) + ',' + Math.round(v[2]*255) + ')'; };
+    g.addColorStop(0, C(cur.c)); g.addColorStop(1, C(cur.d));
+    ctx2d.fillStyle = '#07080d'; ctx2d.fillRect(0, 0, w, h);
+    ctx2d.beginPath(); ctx2d.arc(cx, y, rr, 0, 6.2832); ctx2d.fillStyle = g; ctx2d.fill();
+  }
+
+  /* si on tourne sous ~50 images/s, on réduit un peu la résolution de rendu */
+  imgs++; duree += dt;
+  if (duree > 1.5) {
+    if (imgs / duree < 50 && echelle > 0.5) { echelle = Math.max(0.5, echelle - 0.1); redimensionner(); }
+    imgs = 0; duree = 0;
   }
   requestAnimationFrame(dessiner);
 }
@@ -160,7 +198,7 @@ function appliquer(s) {
     elTexte.innerHTML = (s.heard ? '<span class="entendu">' + esc(s.heard) + '</span>' : '') + (s.said ? '<span class="dit">' + esc(s.said) + '</span>' : '');
   }
   var msg = '';
-  if (etat === 'demarrage') msg = ({ demarrage: 'Niko se prépare…' }[s.status] || s.status || 'Niko se prépare…');
+  if (etat === 'demarrage') msg = s.status === 'demarrage' ? 'Niko se prépare…' : (s.status || 'Niko se prépare…');
   elStatut.textContent = msg.replace(/_/g, ' ');
   elStatut.classList.toggle('visible', !!msg);
 }
@@ -171,6 +209,26 @@ function boucle() {
     .then(function(){ setTimeout(boucle, 250); });
 }
 boucle();
+
+/* ---- Diagnostic : toucher l'écran 3 fois de suite affiche ce que Niko entend et fait ---- */
+var elDebug = document.getElementById('debug'), touches = [];
+function rafraichirDebug() {
+  if (!elDebug.classList.contains('visible')) return;
+  fetch('/api/debug', { cache: 'no-store' }).then(function(r){ return r.text(); })
+    .then(function(t){ elDebug.textContent = t; })
+    .catch(function(){ elDebug.textContent = 'pas de réponse du service'; })
+    .then(function(){ setTimeout(rafraichirDebug, 1000); });
+}
+document.addEventListener('click', function() {
+  var n = Date.now();
+  touches = touches.filter(function(x){ return n - x < 700; });
+  touches.push(n);
+  if (touches.length >= 3) {
+    touches = [];
+    elDebug.classList.toggle('visible');
+    rafraichirDebug();
+  }
+});
 </script>
 </body>
 </html>

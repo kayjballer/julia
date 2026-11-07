@@ -18,7 +18,7 @@ SYSTEM = ("Tu es Niko, un assistant vocal qui vit dans le téléphone de Jacques
           "sans markdown, sans émoji, sans symboles. Si tu ne sais pas, dis-le simplement. Nous sommes le {date}, il est {heure}.")
 
 AUDIO_DIR = os.path.join(DATA, 'audio')
-STATE = {'phase': 'demarrage', 'awake': False, 'level': 0.0, 'heard': '', 'said': '', 'status': 'demarrage'}
+STATE = {'phase': 'demarrage', 'awake': False, 'level': 0.0, 'heard': '', 'said': '', 'status': 'demarrage', 'stats': '', 'mic': ''}
 _last_write = [0.0]
 
 
@@ -157,9 +157,12 @@ class _Init(PythonJavaClass):
     def onInit(self, status):
         try:
             if status == 0:
-                TTS['eng'].setLanguage(Locale.FRENCH)
+                code = TTS['eng'].setLanguage(Locale.FRENCH)
                 TTS['eng'].setSpeechRate(1.05)
                 TTS['ready'] = True
+                log('voix prete (setLanguage=%s ; -1/-2 = voix francaise absente)' % code)
+            else:
+                log('voix: echec init status=%s' % status)
         except Exception:
             log('tts init: ' + traceback.format_exc()[-200:])
 
@@ -356,6 +359,7 @@ def settle(spoken):
 
 
 def handle(path):
+    log('phrase captee, envoi a whisper')
     push_state(phase='reflexion', force=True)
     try:
         text = transcribe(path)
@@ -367,16 +371,19 @@ def handle(path):
         os.remove(path)
     except Exception:
         pass
+    log('whisper: "%s"' % text)
     if is_noise(text):
+        log('  -> ignore (bruit)')
         push_state(phase='veille', awake=awake(), force=True)
         return
     called, cmd = split_wake(text)
     if not called and not awake():
+        log('  -> ignore (pas appele par son nom)')
         push_state(phase='veille', awake=False, heard='', force=True)       # on n'a pas parlé à Niko
         return
     cmd = cmd if called else text
     push_state(heard=text, said='', awake=True, force=True)
-    log('entendu: ' + text)
+    log('  -> pour Niko : "%s"' % cmd)
     if time.time() - S['last_talk'] > IDLE_RESET:
         del HIST[:]
     if called and not cmd:
@@ -401,6 +408,7 @@ def handle(path):
 
 
 def main():
+    log('service Niko demarre')
     tts_make()
     threading.Thread(target=guard, daemon=True).start()
     started = False
@@ -412,6 +420,7 @@ def main():
                 r = str(Ears.start(AUDIO_DIR))
                 if r == 'ok':
                     started = True
+                    log('micro ouvert : ' + str(Ears.info()))
                 else:
                     push_state(status='micro: ' + r, force=True)
                     log('micro: ' + r)
@@ -425,7 +434,7 @@ def main():
                 push_state(phase='demarrage', force=True)
             if now - last_chk > 1.0:
                 last_chk = now
-                push_state(status=G['status'], force=True)
+                push_state(status=G['status'], stats=str(Ears.stats()), mic=str(Ears.info()), force=True)
             if STATE['phase'] == 'veille':
                 push_state(phase='ecoute' if Ears.voice() else 'veille', level=float(Ears.level()))
             elif STATE['phase'] == 'ecoute':
