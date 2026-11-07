@@ -79,6 +79,7 @@ def debug_text():
         '--- service_info', tail('service_info.txt', 3),
         '--- service_err', tail('service_err.txt', 6),
         '--- niko.log', tail('niko.log', 30),
+        '--- whisper.log', tail('whisper.log', 12),
         '--- main.log', tail('main.log', 8)])
 
 

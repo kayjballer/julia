@@ -13,7 +13,7 @@ MAX_TOKENS = 160
 WAKE = ('niko', 'nico', 'nikko', 'nicko', 'niquo', 'nigo', 'miko')
 GREET = ('dis', 'salut', 'hey', 'hé', 'he', 'ok', 'oh', 'ho', 'bonjour', 'coucou', 'ben', 'eh')
 STOP = ('stop', 'tais toi', 'silence', 'ca suffit', 'arrete', 'arrete toi', 'ferme la')
-WH_PROMPT = "Niko. Salut Niko, quelle heure est-il ? Niko, raconte-moi une blague."
+WH_PROMPT = "Niko. Salut Niko, quelle heure est-il ? Niko, ouvre WhatsApp. Niko, lance YouTube. Niko, raconte-moi une blague."
 HALLU = ('sous-titr', 'amara.org', "merci d'avoir regard", 'merci a tous', 'abonnez-vous', 'a bientot', 'musique')
 SYSTEM = ("Tu es Niko, un assistant vocal qui vit dans le téléphone de Jacques. Tu parles français, avec un ton "
           "direct, chaleureux et naturel. Tes réponses sont dites à voix haute : 1 à 3 phrases courtes, sans liste, "
@@ -200,7 +200,10 @@ def say(text):
     if not text or not TTS['ready']:
         return
     try:
-        TTS['eng'].speak(text, TextToSpeech.QUEUE_ADD, None, 'niko')
+        try:
+            TTS['eng'].speak(autoclass('java.lang.String')(text), TextToSpeech.QUEUE_ADD, None, 'niko')
+        except Exception:
+            TTS['eng'].speak(text, TextToSpeech.QUEUE_ADD, None)
     except Exception:
         log('say: ' + traceback.format_exc()[-200:])
 
