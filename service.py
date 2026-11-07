@@ -12,6 +12,7 @@ MAX_TOKENS = 160
 WAKE = ('niko', 'nico', 'nikko', 'nicko', 'niquo', 'nigo', 'miko')
 GREET = ('dis', 'salut', 'hey', 'hé', 'he', 'ok', 'oh', 'ho', 'bonjour', 'coucou', 'ben', 'eh')
 STOP = ('stop', 'tais toi', 'silence', 'ca suffit', 'arrete', 'arrete toi', 'ferme la')
+WH_PROMPT = "Niko. Salut Niko, quelle heure est-il ? Niko, raconte-moi une blague."
 HALLU = ('sous-titr', 'amara.org', "merci d'avoir regard", 'merci a tous', 'abonnez-vous', 'a bientot', 'musique')
 SYSTEM = ("Tu es Niko, un assistant vocal qui vit dans le téléphone de Jacques. Tu parles français, avec un ton "
           "direct, chaleureux et naturel. Tes réponses sont dites à voix haute : 1 à 3 phrases courtes, sans liste, "
@@ -249,7 +250,7 @@ def transcribe(path):
 
     def field(name, val):
         return ('--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (b, name, val)).encode()
-    body = (field('temperature', '0.0') + field('response_format', 'json') +
+    body = (field('temperature', '0.0') + field('response_format', 'json') + field('prompt', WH_PROMPT) +
             ('--%s\r\nContent-Disposition: form-data; name="file"; filename="a.wav"\r\nContent-Type: audio/wav\r\n\r\n' % b).encode() +
             data + ('\r\n--%s--\r\n' % b).encode())
     req = urllib.request.Request(WH_URL, data=body, headers={'Content-Type': 'multipart/form-data; boundary=' + b})
@@ -267,12 +268,30 @@ def is_noise(text):
     return any(h in low for h in HALLU)
 
 
+def lev1(a, b):
+    """Vrai si a et b different d'une seule lettre au plus (remplacement, ajout ou retrait)."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b)) == 1
+    s, l = (a, b) if len(a) < len(b) else (b, a)
+    return any(l[:i] + l[i + 1:] == s for i in range(len(l)))
+
+
+def is_wake(n):
+    return n in WAKE or (3 <= len(n) <= 6 and lev1(n, 'niko'))
+
+
 def split_wake(text):
-    """Renvoie (appele, commande). Le nom doit tomber dans les 4 premiers mots."""
+    """Renvoie (appele, commande). Le nom doit tomber dans les 4 premiers mots (ou en deux mots : "ni ko")."""
     words = text.split()
     for i, wd in enumerate(words[:4]):
-        if norm(wd) in WAKE:
-            rest = words[i + 1:]
+        n = norm(wd)
+        two = n + norm(words[i + 1]) if i + 1 < len(words) else ''
+        if is_wake(n) or (two and len(n) <= 3 and is_wake(two)):
+            rest = words[i + (2 if (not is_wake(n)) else 1):]
             while rest and norm(rest[0]) in GREET:
                 rest = rest[1:]
             return True, ' '.join(rest).strip(' ,.!?;:')
@@ -362,7 +381,9 @@ def handle(path):
     log('phrase captee, envoi a whisper')
     push_state(phase='reflexion', force=True)
     try:
+        t_w = time.time()
         text = transcribe(path)
+        log('  (whisper en %.1f s)' % (time.time() - t_w))
     except Exception:
         log('whisper: ' + traceback.format_exc()[-200:])
         push_state(phase='veille', awake=awake(), force=True)

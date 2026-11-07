@@ -21,7 +21,7 @@ public class Ears {
     private static final int RATE = 16000;
     private static final int FRAME = 512;                 /* 32 ms */
     private static final int PRE = 9600;                  /* 0,6 s gardées avant le début de la parole */
-    private static final int MAXS = RATE * 25;            /* phrase de 25 s maximum */
+    private static final int MAXS = RATE * 12;            /* phrase de 12 s maximum */
     private static final int HANG = 22;                   /* ~0,7 s de silence = fin de phrase */
     private static final int START_FRAMES = 3;            /* ~0,1 s de voix pour déclencher */
     private static final int MIN_VOICED = 10;             /* moins de ~0,3 s de voix : on jette (claquement, bruit) */

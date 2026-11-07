@@ -27,7 +27,7 @@ WH_FILE = 'ggml-base-q5_1.bin'
 WH_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/' + WH_FILE
 WH_MODEL = os.path.join(DATA, 'models', WH_FILE)
 WH_LOG = os.path.join(DATA, 'whisper.log')
-WH_ARGS = [['-t', '4', '-l', 'fr', '-bo', '1', '-bs', '1'], ['-t', '4', '-l', 'fr']]   # 2e jeu : au cas ou un option serait inconnue
+WH_ARGS = [['-t', '4', '-l', 'fr', '-bo', '1', '-bs', '1', '-ac', '640'], ['-t', '4', '-l', 'fr', '-bo', '1', '-bs', '1'], ['-t', '4', '-l', 'fr']]   # 2e jeu : au cas ou un option serait inconnue
 WH_LOCK = threading.Lock()
 
 
