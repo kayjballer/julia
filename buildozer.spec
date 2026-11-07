@@ -15,6 +15,7 @@ android.minapi = 24
 android.archs = arm64-v8a
 android.add_libs_arm64_v8a = libs/arm64-v8a/*.so
 android.add_src = java_src
+android.gradle_dependencies = com.alphacephei:vosk-android:0.3.47,net.java.dev.jna:jna:5.13.0@aar
 android.accept_sdk_license = True
 p4a.branch = develop
 p4a.bootstrap = webview

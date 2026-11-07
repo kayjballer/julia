@@ -71,6 +71,12 @@ except Exception:
     raise
 
 try:
+    Stt = autoclass('org.jacques.julia.Stt')
+except Exception:
+    Stt = None
+    w('service_err.txt', 'Stt: ' + traceback.format_exc()[-200:])
+
+try:
     _p = open(os.path.join(DATA, 'llama_bin.txt')).read().strip()
     if _p and os.path.exists(_p):
         os.environ['JULIA_LLAMA_BIN'] = _p
@@ -262,6 +268,51 @@ def transcribe(path):
     return (r.get('text') or '').strip()
 
 
+VOSK_DIR = os.path.join(DATA, 'models', 'vosk-model-small-fr-0.22')
+VOSK_URL = 'https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip'
+VOSK = {'ok': False}
+
+
+def vosk_prepare():
+    try:
+        if Stt is None:
+            log('vosk: classe Stt absente')
+            return
+        if not os.path.isdir(os.path.join(VOSK_DIR, 'am')):
+            import zipfile
+            os.makedirs(os.path.dirname(VOSK_DIR), exist_ok=True)
+            tmp = VOSK_DIR + '.zip'
+            log('vosk: telechargement du modele (41 Mo)')
+            r = urllib.request.urlopen(VOSK_URL, timeout=60, context=(brain.ctx() if brain else None))
+            with open(tmp, 'wb') as f:
+                while True:
+                    c = r.read(262144)
+                    if not c:
+                        break
+                    f.write(c)
+            with zipfile.ZipFile(tmp) as z:
+                z.extractall(os.path.dirname(VOSK_DIR))
+            os.remove(tmp)
+        res = str(Stt.load(VOSK_DIR))
+        VOSK['ok'] = (res == 'ok')
+        log('vosk: ' + res)
+    except Exception:
+        log('vosk: ' + traceback.format_exc()[-200:])
+
+
+def vosk_text(path):
+    """Texte entendu par Vosk (vide si rien), ou None si Vosk a plante (on retombe alors sur Whisper)."""
+    try:
+        j = json.loads(str(Stt.transcribe(path, '')))
+        if 'err' in j:
+            log('vosk: ' + str(j['err'])[:150])
+            return None
+        return (j.get('text') or '').strip()
+    except Exception:
+        log('vosk: ' + traceback.format_exc()[-200:])
+        return None
+
+
 def is_noise(text):
     n = norm(text)
     if len(n) < 2:
@@ -386,8 +437,12 @@ def handle(path):
     push_state(phase='reflexion', force=True)
     try:
         t_w = time.time()
-        text = transcribe(path)
-        log('  (whisper en %.1f s)' % (time.time() - t_w))
+        text = vosk_text(path) if VOSK['ok'] else None
+        if text is not None:
+            log('  (vosk en %.1f s)' % (time.time() - t_w))
+        else:
+            text = transcribe(path)
+            log('  (whisper en %.1f s)' % (time.time() - t_w))
     except Exception:
         log('whisper: ' + traceback.format_exc()[-200:])
         push_state(phase='veille', awake=awake(), force=True)
@@ -433,10 +488,36 @@ def handle(path):
     settle(spoken)
 
 
+def exit_reasons():
+    """Pourquoi le service precedent s'est arrete (Android garde l'historique)."""
+    try:
+        ctx = PythonService.mService
+        am = ctx.getSystemService('activity')
+        lst = am.getHistoricalProcessExitReasons(ctx.getPackageName(), 0, 4)
+        for i in range(lst.size()):
+            e = lst.get(i)
+            log('fin precedente : %s raison %s statut %s : %s' % (e.getProcessName(), e.getReason(), e.getStatus(), str(e.getDescription())))
+    except Exception:
+        log('fin precedente: ' + traceback.format_exc()[-150:])
+
+
+def beat():
+    """Le service signale qu'il est vivant meme quand il attend un long calcul."""
+    while True:
+        time.sleep(3)
+        try:
+            push_state(force=True)
+        except Exception:
+            pass
+
+
 def main():
     log('service Niko demarre')
+    exit_reasons()
+    threading.Thread(target=beat, daemon=True).start()
     tts_make()
     threading.Thread(target=guard, daemon=True).start()
+    threading.Thread(target=vosk_prepare, daemon=True).start()
     started = False
     last_chk = 0.0
     while True:
