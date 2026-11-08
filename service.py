@@ -1,4 +1,4 @@
-# Service Niko : tourne en continu. Micro -> Whisper -> (mot "Niko") -> Qwen -> voix.
+# Service Niko : tourne en continu. Micro -> Vosk -> (mot "Niko") -> Qwen -> voix.
 import os, time, json, re, threading, traceback, unicodedata, urllib.request
 import router
 os.environ['JULIA_SVC'] = '1'
@@ -6,14 +6,12 @@ DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
 
 # ---- réglages (en dur : Niko n'a pas d'écran de réglages) ----
 LLM_URL = 'http://127.0.0.1:8080/v1/chat/completions'
-WH_URL = 'http://127.0.0.1:8083/inference'
 ACTIVE_WINDOW = 15          # secondes pendant lesquelles Niko continue d'écouter sans qu'on redise son nom
 IDLE_RESET = 300            # secondes sans parler : Niko oublie la conversation
 MAX_TOKENS = 160
 WAKE = ('niko', 'nico', 'nikko', 'nicko', 'niquo', 'nigo', 'miko')
 GREET = ('dis', 'salut', 'hey', 'hé', 'he', 'ok', 'oh', 'ho', 'bonjour', 'coucou', 'ben', 'eh')
 STOP = ('stop', 'tais toi', 'silence', 'ca suffit', 'arrete', 'arrete toi', 'ferme la')
-WH_PROMPT = "Niko. Salut Niko, quelle heure est-il ? Niko, ouvre WhatsApp. Niko, lance YouTube. Niko, raconte-moi une blague."
 HALLU = ('sous-titr', 'amara.org', "merci d'avoir regard", 'merci a tous', 'abonnez-vous', 'a bientot', 'musique')
 SYSTEM = ("Tu es Niko, un assistant vocal qui vit dans le téléphone de Jacques. Tu parles français, avec un ton "
           "direct, chaleureux et naturel. Tes réponses sont dites à voix haute : 1 à 3 phrases courtes, sans liste, "
@@ -89,7 +87,7 @@ except Exception:
     w('service_err.txt', 'import brain: ' + traceback.format_exc()[-250:])
 
 
-# ---------------- Gardien : relance Qwen et Whisper s'ils tombent ----------------
+# ---------------- Gardien : relance Qwen s'il tombe ----------------
 def llama_pid(port, name=b'llama_server'):
     tok = b'\x00%d\x00' % port
     try:
@@ -135,18 +133,10 @@ def guard():
                         G['th'] = threading.Thread(target=brain.ensure, daemon=True)
                         G['th'].start()
                 else:
-                    wdown = (not llama_pid(8083, b'whisper_server')) and (not brain.wh_alive())
-                    G['miss_wh'] = G['miss_wh'] + 1 if wdown else 0
-                    if wdown:
-                        G['ready'] = False
-                        wst = brain.WH.get('stage')
-                        G['status'] = 'telechargement de l oreille %d%%' % brain.WH.get('pct', 0) if wst == 'download' else 'oreille en route'
-                        if G['miss_wh'] >= 2 and (G['th3'] is None or not G['th3'].is_alive()) and now - G['last_wh'] > 60:
-                            G['last_wh'] = now
-                            G['th3'] = threading.Thread(target=brain.ensure_wh, daemon=True)
-                            G['th3'].start()
-                    else:
+                    if VOSK['ok']:
                         G['ready'], G['status'] = True, 'pret'
+                    else:
+                        G['ready'], G['status'] = False, "chargement de l'oreille (Vosk)"
             w('service_info.txt', 'cerveau/oreille: %s | micro: %s' % (G['status'], str(Ears.info())))
         except Exception:
             w('service_err.txt', traceback.format_exc()[-300:])
@@ -247,25 +237,11 @@ def clean_tts(t):
     return t.strip()
 
 
-# ---------------- Oreille : Whisper ----------------
+# ---------------- Oreille : Vosk (local) ----------------
 def norm(t):
     t = unicodedata.normalize('NFD', t.lower())
     t = ''.join(c for c in t if unicodedata.category(c) != 'Mn')
     return re.sub(r"[^a-z0-9' ]+", ' ', t).strip()
-
-
-def transcribe(path):
-    b = '----niko%d' % time.time_ns()
-    data = open(path, 'rb').read()
-
-    def field(name, val):
-        return ('--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (b, name, val)).encode()
-    body = (field('temperature', '0.0') + field('response_format', 'json') + field('prompt', WH_PROMPT) +
-            ('--%s\r\nContent-Disposition: form-data; name="file"; filename="a.wav"\r\nContent-Type: audio/wav\r\n\r\n' % b).encode() +
-            data + ('\r\n--%s--\r\n' % b).encode())
-    req = urllib.request.Request(WH_URL, data=body, headers={'Content-Type': 'multipart/form-data; boundary=' + b})
-    r = json.loads(urllib.request.urlopen(req, timeout=60).read())
-    return (r.get('text') or '').strip()
 
 
 VOSK_DIR = os.path.join(DATA, 'models', 'vosk-model-small-fr-0.22')
@@ -275,6 +251,10 @@ VOSK = {'ok': False}
 
 def vosk_prepare():
     try:
+        try:
+            os.remove(os.path.join(DATA, 'models', 'ggml-base-q5_1.bin'))
+        except Exception:
+            pass
         if Stt is None:
             log('vosk: classe Stt absente')
             return
@@ -301,7 +281,7 @@ def vosk_prepare():
 
 
 def vosk_text(path):
-    """Texte entendu par Vosk (vide si rien), ou None si Vosk a plante (on retombe alors sur Whisper)."""
+    """Texte entendu par Vosk (vide si rien), ou None si Vosk a plante."""
     try:
         j = json.loads(str(Stt.transcribe(path, '')))
         if 'err' in j:
@@ -433,7 +413,7 @@ def settle(spoken):
 
 
 def handle(path):
-    log('phrase captee, envoi a whisper')
+    log('phrase captee, envoi a vosk')
     push_state(phase='reflexion', force=True)
     try:
         try:
@@ -441,24 +421,25 @@ def handle(path):
         except Exception:
             dur = 0.0
         t_w = time.time()
-        tv = vosk_text(path) if VOSK['ok'] else None
-        t_v = time.time() - t_w
-        t_w = time.time()
-        try:
-            text = transcribe(path)
-        except Exception:
-            text = tv or ''
-        t_h = time.time() - t_w
-        log('  audio %.1f s | VOSK %.1f s : "%s" | WHISPER %.1f s : "%s"' % (dur, t_v, tv, t_h, text))
+        text = vosk_text(path) if VOSK['ok'] else None
+        if text is None:
+            log('  oreille Vosk indisponible')
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+            push_state(phase='veille', awake=awake(), force=True)
+            return
+        log('  audio %.1f s | vosk en %.1f s' % (dur, time.time() - t_w))
     except Exception:
-        log('whisper: ' + traceback.format_exc()[-200:])
+        log('vosk: ' + traceback.format_exc()[-200:])
         push_state(phase='veille', awake=awake(), force=True)
         return
     try:
         os.remove(path)
     except Exception:
         pass
-    log('texte retenu : "%s"' % text)
+    log('entendu : "%s"' % text)
     if is_noise(text):
         log('  -> ignore (bruit)')
         push_state(phase='veille', awake=awake(), force=True)

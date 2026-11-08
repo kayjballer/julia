@@ -79,7 +79,6 @@ def debug_text():
         '--- service_info', tail('service_info.txt', 3),
         '--- service_err', tail('service_err.txt', 6),
         '--- niko.log', tail('niko.log', 30),
-        '--- whisper.log', tail('whisper.log', 12),
         '--- main.log', tail('main.log', 8)])
 
 
@@ -126,7 +125,7 @@ if not os.environ.get('JULIA_NOSERVER'):
     if ANDROID:
         ask_permissions()
         try:
-            import brain      # télécharge le modèle si besoin ; le service lance ensuite Qwen et Whisper
+            import brain      # télécharge le modèle si besoin ; le service lance ensuite Qwen
             threading.Thread(target=brain.ensure, daemon=True).start()
         except Exception as e:
             log('brain: ' + repr(e))
