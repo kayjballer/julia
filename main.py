@@ -115,6 +115,44 @@ class H(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b)
             return
+        if self.path.split('?')[0] in ('/api/ecoute', '/api/wav'):
+            import re as _re, glob as _glob
+            adir = os.path.join(DATA, 'audio')
+            if self.path.startswith('/api/wav'):
+                m = _re.search(r'[?&]f=([A-Za-z0-9_.]+)', self.path)
+                name = m.group(1) if m else ''
+                fp = os.path.join(adir, name)
+                if not _re.fullmatch(r'seg_\d+\.wav', name) or not os.path.isfile(fp):
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                b = open(fp, 'rb').read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'audio/wav')
+                self.send_header('Content-Length', str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+                return
+            rows = ''
+            fl = sorted(_glob.glob(os.path.join(adir, 'seg_*.wav')), key=os.path.getmtime, reverse=True)
+            for fp in fl[:12]:
+                nm = os.path.basename(fp)
+                rows += ('<p>%s &middot; %.1f s<br><audio controls preload="none" src="/api/wav?f=%s"></audio><br>'
+                         '<a download="%s" href="/api/wav?f=%s">telecharger</a></p>') % (
+                         time.strftime('%H:%M:%S', time.localtime(os.path.getmtime(fp))),
+                         (os.path.getsize(fp) - 44) / 32000.0, nm, nm, nm)
+            page = ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                    '<body style="font:16px sans-serif;background:#111;color:#eee;padding:12px">'
+                    '<h3>Dernieres phrases entendues par Niko</h3>'
+                    '<p>C\'est le son envoye a Vosk, apres nettoyage. Les plus recentes en premier.</p>'
+                    + (rows or '<p>(aucune pour l\'instant)</p>'))
+            b = page.encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
         super().do_GET()
 
     def log_message(self, *a):

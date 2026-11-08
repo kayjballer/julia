@@ -13,6 +13,8 @@ WAKE = ('niko', 'nico', 'nikko', 'nicko', 'niquo', 'nigo', 'miko')
 GREET = ('dis', 'salut', 'hey', 'hé', 'he', 'ok', 'oh', 'ho', 'bonjour', 'coucou', 'ben', 'eh')
 STOP = ('stop', 'tais toi', 'silence', 'ca suffit', 'arrete', 'arrete toi', 'ferme la')
 HALLU = ()   # Vosk ne fait pas les hallucinations de Whisper
+GATE_GRAMMAR = '["niko", "nico", "[unk]"]'   # passe rapide : on ne cherche que le nom de Niko...
+GATE_MS = 2600                                  # ...dans les 2,6 premieres secondes de la phrase
 SYSTEM = ("Tu es Niko, un assistant vocal qui vit dans le téléphone de Jacques. Tu parles français, avec un ton "
           "direct, chaleureux et naturel. Tes réponses sont dites à voix haute : 1 à 3 phrases courtes, sans liste, "
           "sans markdown, sans émoji, sans symboles. Si tu ne sais pas, dis-le simplement. Nous sommes le {date}, il est {heure}.")
@@ -280,16 +282,46 @@ def vosk_prepare():
         log('vosk: ' + traceback.format_exc()[-200:])
 
 
-def vosk_text(path):
-    """Texte entendu par Vosk (vide si rien), ou None si Vosk a plante."""
+def vosk_text(path, from_ms=0):
+    """Transcription libre, a partir de from_ms. Renvoie (texte, ms, cpu_ms) ou None si Vosk a plante."""
     try:
-        j = json.loads(str(Stt.transcribe(path, '')))
+        if from_ms > 0:
+            j = json.loads(str(Stt.transcribeFrom(path, int(from_ms))))
+        else:
+            j = json.loads(str(Stt.transcribe(path, '')))
         if 'err' in j:
             log('vosk: ' + str(j['err'])[:150])
             return None
-        return (j.get('text') or '').strip()
+        return (j.get('text') or '').strip(), int(j.get('ms') or 0), int(j.get('cpu') or 0)
     except Exception:
         log('vosk: ' + traceback.format_exc()[-200:])
+        return None
+
+
+def vosk_gate(path):
+    """Passe rapide : le nom de Niko est-il dit au debut de la phrase ? (Vosk limite a 2 mots + [unk] : bien plus fiable
+    que la transcription libre, et bien plus rapide.)
+    Renvoie (trouve, fin_du_nom_en_ms (-1 si inconnue), ms, cpu_ms, texte_brut) ou None si Vosk a plante."""
+    try:
+        j = json.loads(str(Stt.wake(path, GATE_GRAMMAR, GATE_MS)))
+        if 'err' in j:
+            log('vosk (nom): ' + str(j['err'])[:150])
+            return None
+        ms, cpu = int(j.get('ms') or 0), int(j.get('cpu') or 0)
+        raw = '(' + str(j.get('text') or '').strip() + ')'
+        words = j.get('result')
+        if isinstance(words, list) and words:
+            for wd in words:
+                if norm(str(wd.get('word', ''))) in ('niko', 'nico'):
+                    st, en = float(wd.get('start', 0)), float(wd.get('end', 0))
+                    if en - st <= 1.2:      # un "Niko" dure moins d'une seconde ; plus long = du bruit force dans le mot
+                        return True, int(en * 1000), ms, cpu, raw
+            return False, 0, ms, cpu, raw
+        if any(norm(t) in ('niko', 'nico') for t in str(j.get('text') or '').split()):
+            return True, -1, ms, cpu, raw     # pas d'horodatage : on transcrira toute la phrase
+        return False, 0, ms, cpu, raw
+    except Exception:
+        log('vosk (nom): ' + traceback.format_exc()[-200:])
         return None
 
 
@@ -412,45 +444,69 @@ def settle(spoken):
     push_state(phase='veille', awake=True, level=0.0, force=True)
 
 
-def handle(path):
-    log('phrase captee, envoi a vosk')
-    push_state(phase='reflexion', force=True)
+def handle(info):
+    path = info.get('path', '')
     try:
-        try:
-            dur = (os.path.getsize(path) - 44) / 32000.0
-        except Exception:
-            dur = 0.0
-        t_w = time.time()
-        text = vosk_text(path) if VOSK['ok'] else None
-        if text is None:
-            log('  oreille Vosk indisponible')
-            try:
-                os.remove(path)
-            except Exception:
-                pass
-            push_state(phase='veille', awake=awake(), force=True)
-            return
-        log('  audio %.1f s | vosk en %.1f s' % (dur, time.time() - t_w))
+        dur = (os.path.getsize(path) - 44) / 32000.0
+    except Exception:
+        dur = 0.0
+    log('phrase captee : %.1f s | voix %.3f (crete %.2f) | gain x%.1f | bruit %.4f' % (
+        dur, info.get('lvl', 0), info.get('pk', 0), info.get('g', 1), info.get('nz', 0)))
+    push_state(phase='reflexion', force=True)
+    called, cmd = False, ''
+    try:
+        if awake():
+            # Niko vient de parler : on peut lui repondre sans redire son nom -> transcription libre de toute la phrase
+            r = vosk_text(path)
+            if r is None:
+                log('  oreille Vosk indisponible')
+                push_state(phase='veille', awake=awake(), force=True)
+                return
+            text, ms, cpu = r
+            log('  vosk %.1f s (cpu %.1f s) | entendu : "%s"' % (ms / 1000.0, cpu / 1000.0, text))
+            if is_noise(text):
+                log('  -> ignore (bruit)')
+                push_state(phase='veille', awake=awake(), force=True)
+                return
+            called, cmd = split_wake(text)
+            cmd = cmd if called else text
+        else:
+            # passe rapide : le nom de Niko est-il dit au debut ? Sinon on ne transcrit pas le reste (gain de temps)
+            g = vosk_gate(path)
+            if g is None:
+                log('  oreille Vosk indisponible')
+                push_state(phase='veille', awake=awake(), force=True)
+                return
+            found, end_ms, ms, cpu, raw = g
+            log('  nom Niko : %s (vosk %.1f s, cpu %.1f s) %s' % ('oui' if found else 'non', ms / 1000.0, cpu / 1000.0, raw))
+            if not found:
+                log('  -> ignore (pas appele par son nom)')
+                push_state(phase='veille', awake=False, heard='', force=True)       # on n'a pas parlé à Niko
+                return
+            called = True
+            push_state(awake=True, force=True)
+            if end_ms >= 0 and dur * 1000.0 - end_ms < 400:
+                cmd = ''                                  # il a juste dit "Niko"
+            else:
+                # on ne transcrit que ce qui suit le nom
+                r = vosk_text(path, max(end_ms, 0))
+                if r is None:
+                    log('  oreille Vosk indisponible')
+                    push_state(phase='veille', awake=awake(), force=True)
+                    return
+                text, ms, cpu = r
+                log('  commande : "%s" (vosk %.1f s, cpu %.1f s)' % (text, ms / 1000.0, cpu / 1000.0))
+                cmd = '' if is_noise(text) else text
+                if cmd:
+                    again, rest = split_wake(cmd)         # si le nom traine encore dans le texte, on l'enleve
+                    if again:
+                        cmd = rest
     except Exception:
         log('vosk: ' + traceback.format_exc()[-200:])
         push_state(phase='veille', awake=awake(), force=True)
         return
-    try:
-        os.remove(path)
-    except Exception:
-        pass
-    log('entendu : "%s"' % text)
-    if is_noise(text):
-        log('  -> ignore (bruit)')
-        push_state(phase='veille', awake=awake(), force=True)
-        return
-    called, cmd = split_wake(text)
-    if not called and not awake():
-        log('  -> ignore (pas appele par son nom)')
-        push_state(phase='veille', awake=False, heard='', force=True)       # on n'a pas parlé à Niko
-        return
-    cmd = cmd if called else text
-    push_state(heard=text, said='', awake=True, force=True)
+    shown = ('Niko, ' + cmd) if (called and cmd) else (cmd or 'Niko')
+    push_state(heard=shown, said='', awake=True, force=True)
     log('  -> pour Niko : "%s"' % cmd)
     if time.time() - S['last_talk'] > IDLE_RESET:
         del HIST[:]
@@ -548,7 +604,7 @@ def main():
                 started = False
                 continue
             if kind == 'W' and G['ready'] and TTS['ready']:
-                handle(json.loads(payload)['path'])
+                handle(json.loads(payload))
         except Exception:
             w('service_err.txt', traceback.format_exc()[-300:])
             time.sleep(1)
