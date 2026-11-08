@@ -12,7 +12,7 @@ MAX_TOKENS = 160
 WAKE = ('niko', 'nico', 'nikko', 'nicko', 'niquo', 'nigo', 'miko')
 GREET = ('dis', 'salut', 'hey', 'hé', 'he', 'ok', 'oh', 'ho', 'bonjour', 'coucou', 'ben', 'eh')
 STOP = ('stop', 'tais toi', 'silence', 'ca suffit', 'arrete', 'arrete toi', 'ferme la')
-HALLU = ('sous-titr', 'amara.org', "merci d'avoir regard", 'merci a tous', 'abonnez-vous', 'a bientot', 'musique')
+HALLU = ()   # Vosk ne fait pas les hallucinations de Whisper
 SYSTEM = ("Tu es Niko, un assistant vocal qui vit dans le téléphone de Jacques. Tu parles français, avec un ton "
           "direct, chaleureux et naturel. Tes réponses sont dites à voix haute : 1 à 3 phrases courtes, sans liste, "
           "sans markdown, sans émoji, sans symboles. Si tu ne sais pas, dis-le simplement. Nous sommes le {date}, il est {heure}.")
