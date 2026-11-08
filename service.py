@@ -436,13 +436,20 @@ def handle(path):
     log('phrase captee, envoi a whisper')
     push_state(phase='reflexion', force=True)
     try:
+        try:
+            dur = (os.path.getsize(path) - 44) / 32000.0
+        except Exception:
+            dur = 0.0
         t_w = time.time()
-        text = vosk_text(path) if VOSK['ok'] else None
-        if text is not None:
-            log('  (vosk en %.1f s)' % (time.time() - t_w))
-        else:
+        tv = vosk_text(path) if VOSK['ok'] else None
+        t_v = time.time() - t_w
+        t_w = time.time()
+        try:
             text = transcribe(path)
-            log('  (whisper en %.1f s)' % (time.time() - t_w))
+        except Exception:
+            text = tv or ''
+        t_h = time.time() - t_w
+        log('  audio %.1f s | VOSK %.1f s : "%s" | WHISPER %.1f s : "%s"' % (dur, t_v, tv, t_h, text))
     except Exception:
         log('whisper: ' + traceback.format_exc()[-200:])
         push_state(phase='veille', awake=awake(), force=True)
@@ -451,7 +458,7 @@ def handle(path):
         os.remove(path)
     except Exception:
         pass
-    log('whisper: "%s"' % text)
+    log('texte retenu : "%s"' % text)
     if is_noise(text):
         log('  -> ignore (bruit)')
         push_state(phase='veille', awake=awake(), force=True)
