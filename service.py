@@ -8,7 +8,7 @@ DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
 LLM_URL = 'http://127.0.0.1:8080/v1/chat/completions'
 ACTIVE_WINDOW = 15          # secondes pendant lesquelles Niko continue d'écouter sans qu'on redise son nom
 IDLE_RESET = 300            # secondes sans parler : Niko oublie la conversation
-MAX_TOKENS = 160
+MAX_TOKENS = 100
 WAKE = ('niko', 'nico', 'nikko', 'nicko', 'niquo', 'nigo', 'miko')
 GREET = ('dis', 'salut', 'hey', 'hé', 'he', 'ok', 'oh', 'ho', 'bonjour', 'coucou', 'ben', 'eh')
 STOP = ('stop', 'tais toi', 'silence', 'ca suffit', 'arrete', 'arrete toi', 'ferme la')
@@ -16,7 +16,7 @@ HALLU = ()   # Vosk ne fait pas les hallucinations de Whisper
 GATE_GRAMMAR = '["niko", "nico", "[unk]"]'   # passe rapide : on ne cherche que le nom de Niko...
 GATE_MS = 2600                                  # ...dans les 2,6 premieres secondes de la phrase
 SYSTEM = ("Tu es Niko, un assistant vocal qui vit dans le téléphone de Jacques. Tu parles français, avec un ton "
-          "direct, chaleureux et naturel. Tes réponses sont dites à voix haute : 1 à 3 phrases courtes, sans liste, "
+          "direct, chaleureux et naturel. Tes réponses sont dites à voix haute : 1 ou 2 phrases courtes (40 mots maximum), précises, sans détour, sans liste, "
           "sans markdown, sans émoji, sans symboles. Si tu ne sais pas, dis-le simplement. Nous sommes le {date}, il est {heure}.")
 
 AUDIO_DIR = os.path.join(DATA, 'audio')
@@ -380,10 +380,11 @@ def system_prompt():
 
 def ask(text):
     msgs = [{'role': 'system', 'content': system_prompt()}] + HIST[-8:] + [{'role': 'user', 'content': text}]
-    body = json.dumps({'messages': msgs, 'max_tokens': MAX_TOKENS, 'temperature': 1.0, 'top_p': 0.95, 'top_k': 64,
+    body = json.dumps({'messages': msgs, 'max_tokens': MAX_TOKENS, 'temperature': 1.0, 'top_p': 1.0, 'top_k': 20, 'presence_penalty': 2.0,
                        'stream': True, 'cache_prompt': True}).encode()
     req = urllib.request.Request(LLM_URL, data=body, headers={'Content-Type': 'application/json'})
     full, buf, spoken = '', '', False
+    t0, t1 = time.time(), None
 
     def flush(chunk):
         nonlocal spoken
@@ -410,6 +411,8 @@ def ask(text):
                 continue
             if not delta:
                 continue
+            if t1 is None:
+                t1 = time.time()
             full += delta
             buf += delta
             push_state(said=clean_tts(full))
@@ -420,6 +423,10 @@ def ask(text):
                 buf = parts[-1]
     flush(buf)
     full = clean_tts(full)
+    try:
+        log('  llm : premier mot %.1f s | total %.1f s | %d mots' % ((t1 or time.time()) - t0, time.time() - t0, len(full.split())))
+    except Exception:
+        pass
     if full:
         HIST.extend([{'role': 'user', 'content': text}, {'role': 'assistant', 'content': full}])
         del HIST[:-12]
