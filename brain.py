@@ -9,12 +9,13 @@ def ctx():
         log('certifi: ' + repr(e))
         return ssl.create_default_context()
 
-URL = 'https://huggingface.co/HauhauCS/Qwen3.5-2B-Uncensored-HauhauCS-Aggressive/resolve/main/Qwen3.5-2B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf'
-SIZE = 1270808032
+# ancien Qwen 2B : HauhauCS/Qwen3.5-2B-Uncensored-HauhauCS-Aggressive, 1270808032 octets, qwen35-2b-unc.gguf
+URL = 'https://huggingface.co/mlabonne/gemma-3-1b-it-abliterated-GGUF/resolve/main/gemma-3-1b-it-abliterated.q4_k_m.gguf'
+SIZE = 806057920
 PORT = 8080
 ST = {'stage': 'init', 'pct': 0, 'err': ''}
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
-MODEL = os.path.join(DATA, 'models', 'qwen35-2b-unc.gguf')
+MODEL = os.path.join(DATA, 'models', 'gemma3-1b-unc.gguf')
 LOG = os.path.join(DATA, 'llama.log')
 EMB_REPO = 'PeterAM4/Qwen3-Embedding-0.6B-GGUF'
 EMB_PORT = 8082

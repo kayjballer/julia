@@ -380,7 +380,7 @@ def system_prompt():
 
 def ask(text):
     msgs = [{'role': 'system', 'content': system_prompt()}] + HIST[-8:] + [{'role': 'user', 'content': text}]
-    body = json.dumps({'messages': msgs, 'max_tokens': MAX_TOKENS, 'temperature': 0.7, 'top_p': 0.9,
+    body = json.dumps({'messages': msgs, 'max_tokens': MAX_TOKENS, 'temperature': 1.0, 'top_p': 0.95, 'top_k': 64,
                        'stream': True, 'cache_prompt': True}).encode()
     req = urllib.request.Request(LLM_URL, data=body, headers={'Content-Type': 'application/json'})
     full, buf, spoken = '', '', False
