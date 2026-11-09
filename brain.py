@@ -11,12 +11,13 @@ def ctx():
 
 # ancien Qwen 2B : HauhauCS/Qwen3.5-2B-Uncensored-HauhauCS-Aggressive, 1270808032 octets, qwen35-2b-unc.gguf
 # precedent : Gemma 3 1B abliterated (mlabonne), 806057920 octets, gemma3-1b-unc.gguf
-URL = 'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf'
-SIZE = 532517120
+# precedent : Qwen3.5 0.8B (unsloth), 532517120 octets, qwen35-08b.gguf
+URL = 'https://huggingface.co/llmfan46/gemma-4-E4B-it-ultra-uncensored-heretic-GGUF/resolve/main/gemma-4-E4B-it-ultra-uncensored-heretic-Q4_K_M.gguf'
+SIZE = 5335289696
 PORT = 8080
 ST = {'stage': 'init', 'pct': 0, 'err': ''}
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
-MODEL = os.path.join(DATA, 'models', 'qwen35-08b.gguf')
+MODEL = os.path.join(DATA, 'models', 'gemma4-e4b.gguf')
 LOG = os.path.join(DATA, 'llama.log')
 EMB_REPO = 'PeterAM4/Qwen3-Embedding-0.6B-GGUF'
 EMB_PORT = 8082
@@ -177,7 +178,7 @@ def ensure_emb():
         EMB['stage'] = 'download'
         m = emb_model()
         EMB['stage'] = 'start'
-        subprocess.Popen([b, '-m', m, '--embedding', '--pooling', 'last', '-c', '512', '-np', '1', '-t', '4', '-lm', 'none',
+        subprocess.Popen([b, '-m', m, '--embedding', '--pooling', 'last', '-c', '512', '-np', '1', '-t', '2', '-lm', 'none',
                           '--host', '127.0.0.1', '--port', str(EMB_PORT)], stdout=open(EMB_LOG, 'ab'), stderr=subprocess.STDOUT)
         for _ in range(60):
             if emb_alive():
@@ -190,8 +191,35 @@ def ensure_emb():
         log('embeddings: ' + repr(e))
 
 
+EMBT = {'th': None, 'last': 0.0}
+
+
 def start_emb():
-    pass   # Niko : ni embeddings ni Whisper
+    # Lance (ou relance, au plus une fois par minute) le serveur d'embeddings de la memoire de Niko.
+    if EMBT['th'] is not None and EMBT['th'].is_alive():
+        return
+    if emb_alive():
+        EMB['stage'] = 'ready'
+        return
+    if time.time() - EMBT['last'] < 60:
+        return
+    EMBT['last'] = time.time()
+    EMBT['th'] = threading.Thread(target=ensure_emb, daemon=True)
+    EMBT['th'].start()
+
+
+def cleanup_old():
+    # Quand le nouveau modele est complet, on supprime les anciens (libere plusieurs Go).
+    try:
+        if os.path.exists(MODEL) and os.path.getsize(MODEL) >= SIZE:
+            d = os.path.dirname(MODEL)
+            for n in ('qwen35-08b.gguf', 'qwen35-2b-unc.gguf', 'gemma3-1b-unc.gguf'):
+                p = os.path.join(d, n)
+                if os.path.exists(p):
+                    os.remove(p)
+                    log('ancien modele supprime : ' + n)
+    except Exception as e:
+        log('nettoyage: ' + repr(e))
 
 
 def ensure():
@@ -206,6 +234,7 @@ def ensure():
             return
         ST['stage'] = 'download'
         m = get_model()
+        cleanup_old()
         ST['stage'] = 'start'
         if os.environ.get('JULIA_SVC') != '1' and wait_service():
             for _ in range(60):
@@ -215,7 +244,7 @@ def ensure():
                     return
                 time.sleep(1)
         out = open(LOG, 'ab')
-        subprocess.Popen([b, '-m', m, '-t', '4', '-c', '4096', '-np', '2', '-fa', 'on', '-lm', 'none', '--chat-template-kwargs', '{"enable_thinking": false}',
+        subprocess.Popen([b, '-m', m, '-t', '4', '-c', '2048', '-np', '1', '-fa', 'on', '-lm', 'none', '--chat-template-kwargs', '{"enable_thinking": false}',
                           '--host', '127.0.0.1', '--port', str(PORT)],
                          stdout=out, stderr=subprocess.STDOUT)
         for _ in range(120):

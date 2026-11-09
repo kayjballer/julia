@@ -1,6 +1,10 @@
 # Service Niko : tourne en continu. Micro -> Vosk -> (mot "Niko") -> Qwen -> voix.
 import os, time, json, re, threading, traceback, unicodedata, urllib.request
 import router
+try:
+    import actions, souvenirs
+except Exception:
+    actions = souvenirs = None
 os.environ['JULIA_SVC'] = '1'
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
 
@@ -135,6 +139,10 @@ def guard():
                         G['th'] = threading.Thread(target=brain.ensure, daemon=True)
                         G['th'].start()
                 else:
+                    try:
+                        brain.start_emb()
+                    except Exception:
+                        pass
                     if VOSK['ok']:
                         G['ready'], G['status'] = True, 'pret'
                     else:
@@ -379,11 +387,12 @@ def system_prompt():
 
 
 def ask(text):
-    msgs = [{'role': 'system', 'content': system_prompt()}] + HIST[-8:] + [{'role': 'user', 'content': text}]
-    body = json.dumps({'messages': msgs, 'max_tokens': MAX_TOKENS, 'temperature': 1.0, 'top_p': 1.0, 'top_k': 20, 'presence_penalty': 2.0,
+    msgs = [{'role': 'system', 'content': system_prompt() + mem_block(text)}] + HIST[-8:] + [{'role': 'user', 'content': text}]
+    body = json.dumps({'messages': msgs, 'max_tokens': MAX_TOKENS, 'temperature': 1.0, 'top_p': 0.95, 'top_k': 64,
                        'stream': True, 'cache_prompt': True}).encode()
     req = urllib.request.Request(LLM_URL, data=body, headers={'Content-Type': 'application/json'})
     full, buf, spoken = '', '', False
+    said_parts, cut = [], False
     t0, t1 = time.time(), None
 
     def flush(chunk):
@@ -396,6 +405,7 @@ def ask(text):
             push_state(phase='parle', force=True)
             spoken = True
         say(chunk)
+        said_parts.append(chunk)
 
     with urllib.request.urlopen(req, timeout=120) as r:
         for raw in r:
@@ -421,8 +431,12 @@ def ask(text):
                 for p in parts[:-1]:
                     flush(p)
                 buf = parts[-1]
-    flush(buf)
-    full = clean_tts(full)
+            if len(said_parts) >= MAX_PHRASES:
+                cut = True
+                break
+    if not cut:
+        flush(buf)
+    full = clean_tts(' '.join(said_parts)) if cut else clean_tts(full)
     try:
         log('  llm : premier mot %.1f s | total %.1f s | %d mots' % ((t1 or time.time()) - t0, time.time() - t0, len(full.split())))
     except Exception:
@@ -431,6 +445,98 @@ def ask(text):
         HIST.extend([{'role': 'user', 'content': text}, {'role': 'assistant', 'content': full}])
         del HIST[:-12]
     return full, spoken
+
+
+
+# ---------------- Actions et memoire (isolees : une panne ici ne bloque jamais la discussion) ----------------
+MAX_PHRASES = 2
+PENDING = {'a': None, 'until': 0.0}
+TM = {'t': 0.0, 'b': 0.0}
+if actions is not None:
+    actions.LOG = log
+if souvenirs is not None:
+    souvenirs.LOG = log
+
+
+def mem_block(text):
+    if souvenirs is None:
+        return ''
+    try:
+        got = souvenirs.recall(text)
+    except Exception:
+        return ''
+    if not got:
+        return ''
+    log('  souvenirs rappeles : %d' % len(got))
+    return "\nCe que tu sais de Jacques (utilise-le seulement si c'est utile) : " + ' ; '.join(got) + '.'
+
+
+def say_turn(msg):
+    Ears.setMuted(True)
+    push_state(phase='parle', said=msg, force=True)
+    say(msg)
+    settle(True)
+
+
+def niko_tools(cmd):
+    """True si la phrase a ete traitee ici (souvenir ou action). False : on passe a la discussion."""
+    try:
+        n = norm(cmd)
+        p = PENDING['a']
+        PENDING['a'] = None
+        if p is not None and time.time() < PENDING['until'] and actions is not None:
+            if actions.is_yes(n):
+                log('  action confirmee : ' + str(p))
+                say_turn(actions.run(p))
+                return True
+            if actions.is_no(n):
+                log('  action refusee')
+                say_turn("D'accord, j'annule.")
+                return True
+        if souvenirs is not None:
+            if souvenirs.is_forget(cmd):
+                x = souvenirs.forget_last()
+                say_turn("C'est oublié." if x else "Je n'ai rien à oublier.")
+                return True
+            fact = souvenirs.parse_remember(cmd)
+            if fact:
+                souvenirs.add(fact)
+                say_turn("C'est noté.")
+                return True
+        if actions is None:
+            return False
+        a = actions.parse(cmd)
+        if a is None and router.role(cmd) == 'commande':
+            a = actions.llm_action(cmd)
+        if a is None:
+            return False
+        log('  action comprise : ' + str(a))
+        a, msg = actions.prepare(a)
+        if a is None:
+            if msg:
+                say_turn(msg)
+                return True
+            return False
+        PENDING['a'], PENDING['until'] = a, time.time() + ACTIVE_WINDOW + 20
+        say_turn(actions.confirm_text(a))
+        return True
+    except Exception:
+        log('outils: ' + traceback.format_exc()[-250:])
+        PENDING['a'] = None
+        return False
+
+
+def tick_tools(now):
+    """Appele par la boucle principale : minuteurs/alarmes arrives a echeance, vecteurs en retard."""
+    if actions is not None and now - TM['t'] > 1.0 and STATE['phase'] in ('veille', 'ecoute') and not tts_busy():
+        TM['t'] = now
+        for m in actions.due():
+            log('  echeance : ' + m[:40])
+            say_turn(m)
+    if souvenirs is not None and now - TM['b'] > 30.0:
+        TM['b'] = now
+        if souvenirs.count():
+            threading.Thread(target=souvenirs.backfill, daemon=True).start()
 
 
 # ---------------- Boucle principale : écoute -> comprend -> répond ----------------
@@ -527,6 +633,8 @@ def handle(info):
         tts_stop()
         settle(False)
         return
+    if niko_tools(cmd):
+        return
     try:
         log('role: ' + router.role(cmd))
         _, spoken = ask(cmd)
@@ -597,6 +705,7 @@ def main():
                 push_state(phase='ecoute' if Ears.voice() else 'veille', level=float(Ears.level()))
             elif STATE['phase'] == 'ecoute':
                 push_state(phase='ecoute' if Ears.voice() else 'veille', level=float(Ears.level()))
+            tick_tools(now)
             ev = Ears.poll()
             if ev is None:
                 time.sleep(0.04)
