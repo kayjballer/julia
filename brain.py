@@ -12,12 +12,15 @@ def ctx():
 # ancien Qwen 2B : HauhauCS/Qwen3.5-2B-Uncensored-HauhauCS-Aggressive, 1270808032 octets, qwen35-2b-unc.gguf
 # precedent : Gemma 3 1B abliterated (mlabonne), 806057920 octets, gemma3-1b-unc.gguf
 # precedent : Qwen3.5 0.8B (unsloth), 532517120 octets, qwen35-08b.gguf
-URL = 'https://huggingface.co/llmfan46/gemma-4-E4B-it-ultra-uncensored-heretic-GGUF/resolve/main/gemma-4-E4B-it-ultra-uncensored-heretic-Q4_K_M.gguf'
-SIZE = 5335289696
+URL = 'https://huggingface.co/bartowski/mlabonne_Qwen3-4B-abliterated-GGUF/resolve/main/mlabonne_Qwen3-4B-abliterated-Q4_K_M.gguf'
+SIZE = 2497280544
+ACT_URL = 'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf'
+ACT_SIZE = 532517120
 PORT = 8080
 ST = {'stage': 'init', 'pct': 0, 'err': ''}
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
-MODEL = os.path.join(DATA, 'models', 'gemma4-e4b.gguf')
+MODEL = os.path.join(DATA, 'models', 'qwen3-4b-unc.gguf')
+ACT_MODEL = os.path.join(DATA, 'models', 'qwen35-08b.gguf')
 LOG = os.path.join(DATA, 'llama.log')
 EMB_REPO = 'PeterAM4/Qwen3-Embedding-0.6B-GGUF'
 EMB_PORT = 8082
@@ -208,12 +211,51 @@ def start_emb():
     EMBT['th'].start()
 
 
+ACTT = {'th': None}
+
+
+def get_act():
+    if os.path.exists(ACT_MODEL) and os.path.getsize(ACT_MODEL) >= ACT_SIZE:
+        return ACT_MODEL
+    os.makedirs(os.path.dirname(ACT_MODEL), exist_ok=True)
+    part = ACT_MODEL + '.part'
+    while True:
+        have = os.path.getsize(part) if os.path.exists(part) else 0
+        if have >= ACT_SIZE:
+            break
+        try:
+            req = urllib.request.Request(ACT_URL, headers={'Range': 'bytes=%d-' % have})
+            with urllib.request.urlopen(req, timeout=30, context=ctx()) as r:
+                mode = 'ab'
+                if have and r.status != 206:
+                    mode, have = 'wb', 0
+                with open(part, mode) as f:
+                    while True:
+                        b = r.read(1 << 16)
+                        if not b:
+                            break
+                        f.write(b)
+        except Exception as e:
+            log('telechargement actions: ' + repr(e))
+            time.sleep(5)
+    os.rename(part, ACT_MODEL)
+    return ACT_MODEL
+
+
+def start_act():
+    t = ACTT['th']
+    if t is not None and t.is_alive():
+        return
+    ACTT['th'] = threading.Thread(target=get_act, daemon=True)
+    ACTT['th'].start()
+
+
 def cleanup_old():
     # Quand le nouveau modele est complet, on supprime les anciens (libere plusieurs Go).
     try:
         if os.path.exists(MODEL) and os.path.getsize(MODEL) >= SIZE:
             d = os.path.dirname(MODEL)
-            for n in ('qwen35-08b.gguf', 'qwen35-2b-unc.gguf', 'gemma3-1b-unc.gguf'):
+            for n in ('qwen35-2b-unc.gguf', 'gemma3-1b-unc.gguf', 'gemma4-e4b.gguf'):
                 p = os.path.join(d, n)
                 if os.path.exists(p):
                     os.remove(p)
@@ -223,6 +265,7 @@ def cleanup_old():
 
 
 def ensure():
+    start_act()
     if alive():
         ST['stage'] = 'ready'
         start_emb()
