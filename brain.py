@@ -24,6 +24,7 @@ ACT_MODEL = os.path.join(DATA, 'models', 'qwen35-08b.gguf')
 LOG = os.path.join(DATA, 'llama.log')
 EMB_REPO = 'PeterAM4/Qwen3-Embedding-0.6B-GGUF'
 EMB_PORT = 8082
+EMB_ON = False
 EMB = {'stage': 'off', 'pct': 0, 'err': ''}
 EMB_MODEL = os.path.join(DATA, 'models', 'qwen3-emb-q4.gguf')
 EMB_LOG = os.path.join(DATA, 'emb.log')
@@ -198,6 +199,8 @@ EMBT = {'th': None, 'last': 0.0}
 
 
 def start_emb():
+    if not EMB_ON:
+        return
     # Lance (ou relance, au plus une fois par minute) le serveur d'embeddings de la memoire de Niko.
     if EMBT['th'] is not None and EMBT['th'].is_alive():
         return
