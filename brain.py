@@ -13,7 +13,7 @@ def ctx():
 # precedent : Gemma 3 1B abliterated (mlabonne), 806057920 octets, gemma3-1b-unc.gguf
 # precedent : Qwen3.5 0.8B (unsloth), 532517120 octets, qwen35-08b.gguf
 URL = 'https://huggingface.co/bartowski/mlabonne_Qwen3-4B-abliterated-GGUF/resolve/main/mlabonne_Qwen3-4B-abliterated-Q4_K_M.gguf'
-SIZE = 5335289696
+SIZE = 2400000000
 PORT = 8080
 ST = {'stage': 'init', 'pct': 0, 'err': ''}
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
@@ -62,11 +62,25 @@ def alive():
         return False
 
 
+def remote_size(url):
+    r = urllib.request.urlopen(urllib.request.Request(url, headers={'Range': 'bytes=0-0'}), timeout=30, context=ctx())
+    return int(r.headers['Content-Range'].split('/')[-1])
+
+
 def get_model():
+    global SIZE
     for p in (MODEL, os.path.expanduser('~/qwen.gguf')):
         if os.path.exists(p) and os.path.getsize(p) >= SIZE:
             return p
     os.makedirs(os.path.dirname(MODEL), exist_ok=True)
+    while True:
+        try:
+            SIZE = remote_size(URL)
+            break
+        except Exception as e:
+            ST['err'] = repr(e)
+            log('taille: ' + repr(e))
+            time.sleep(5)
     part = MODEL + '.part'
     while True:
         have = os.path.getsize(part) if os.path.exists(part) else 0
