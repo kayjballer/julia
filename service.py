@@ -206,6 +206,59 @@ def say(text):
         log('say: ' + traceback.format_exc()[-200:])
 
 
+WAIT_EARLY = True      # False = ne pas parler avant la transcription
+WAIT = {'on': False, 'gen': 0, 'kind': 'autre', 'said': False, 'last': 0.0, 'word': ''}
+WAIT_GENERIC = ('Hmm...', 'Alors...', 'Voyons...', 'Attends...', 'Euh...')
+
+
+def wait_word():
+    import random
+    a = router.VOIX.get(WAIT['kind'], router.VOIX['autre'])[2]
+    pool = [x for x in (tuple(a) + WAIT_GENERIC) if x != WAIT['word']]
+    return random.choice(pool)
+
+
+def wait_say(word):
+    p, v, _ = router.VOIX.get(WAIT['kind'], router.VOIX['autre'])
+    voice_set(p, v)
+    Ears.setMuted(True)
+    push_state(phase='parle', force=True)
+    say(word)
+    log('attente : ' + word)
+    WAIT['said'] = True
+    WAIT['word'] = word
+    WAIT['last'] = time.time()
+
+
+def wait_loop(g):
+    while WAIT['on'] and WAIT['gen'] == g:
+        time.sleep(0.15)
+        if not (WAIT['on'] and WAIT['gen'] == g):
+            break
+        if time.time() - WAIT['last'] < 1.6 or tts_busy():
+            continue
+        try:
+            wait_say(wait_word())
+        except Exception:
+            log('attente: ' + traceback.format_exc()[-150:])
+
+
+def wait_start(first=''):
+    WAIT['gen'] += 1
+    WAIT['on'] = True
+    WAIT['last'] = time.time() - 0.6      # premier mot apres environ 1 s de silence
+    if first:
+        try:
+            wait_say(first)
+        except Exception:
+            pass
+    threading.Thread(target=wait_loop, args=(WAIT['gen'],), daemon=True).start()
+
+
+def wait_stop():
+    WAIT['on'] = False
+
+
 def voice_set(p, v):
     try:
         TTS['eng'].setPitch(float(p))
@@ -215,6 +268,7 @@ def voice_set(p, v):
 
 
 def tts_stop():
+    WAIT['on'] = False
     try:
         TTS['eng'].stop()
     except Exception:
@@ -418,9 +472,15 @@ def ask(text):
                 continue
             if not delta:
                 continue
+            if not full:
+                wait_stop()
             full += delta
             buf += delta
             push_state(said=clean_tts(full))
+            if not spoken and len(buf) >= 24 and ',' in buf[12:]:
+                k = buf.index(',', 12) + 1
+                flush(buf[:k])
+                buf = buf[k:].lstrip()
             parts = _SENT.split(buf)
             if len(parts) > 1:
                 for p in parts[:-1]:
@@ -454,6 +514,21 @@ def settle(spoken):
 
 
 def handle(info):
+    WAIT['said'] = False
+    WAIT['kind'] = 'autre'
+    try:
+        if WAIT_EARLY and awake():
+            wait_start()
+        handle_inner(info)
+    finally:
+        wait_stop()
+        if WAIT['said']:
+            if tts_busy():
+                tts_wait()
+            Ears.setMuted(False)
+
+
+def handle_inner(info):
     path = info.get('path', '')
     try:
         dur = (os.path.getsize(path) - 44) / 32000.0
@@ -498,6 +573,7 @@ def handle(info):
                 return
             called = True
             push_state(awake=True, force=True)
+            wait_start()
             if end_ms >= 0 and dur * 1000.0 - end_ms < 400:
                 cmd = ''                                  # il a juste dit "Niko"
             else:
@@ -524,6 +600,7 @@ def handle(info):
     if time.time() - S['last_talk'] > IDLE_RESET:
         del HIST[:]
     if called and not cmd:
+        wait_stop()
         Ears.setMuted(True)
         say('Oui ?')
         push_state(phase='parle', force=True)
@@ -537,14 +614,14 @@ def handle(info):
         kind = router.qtype(cmd)
         p, v, amo = router.amorce(kind)
         log('role: %s | voix %.2f x%.2f' % (kind, p, v))
+        WAIT['kind'] = kind
         voice_set(p, v)
-        if amo:
-            Ears.setMuted(True)
-            push_state(phase='parle', force=True)
-            say(amo)
+        wait_start('' if WAIT['said'] else amo)
         _, spoken = ask(cmd)
-        spoken = spoken or bool(amo)
+        wait_stop()
+        spoken = spoken or WAIT['said']
     except Exception:
+        wait_stop()
         log('qwen: ' + traceback.format_exc()[-200:])
         Ears.setMuted(True)
         say("Je n'arrive pas à réfléchir pour l'instant.")
