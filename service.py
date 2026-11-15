@@ -159,6 +159,7 @@ class _Init(PythonJavaClass):
             if status == 0:
                 code = TTS['eng'].setLanguage(Locale.FRENCH)
                 TTS['eng'].setSpeechRate(1.05)
+                choose_voice()
                 TTS['ready'] = True
                 log('voix prete (setLanguage=%s ; -1/-2 = voix francaise absente)' % code)
             else:
@@ -256,6 +257,35 @@ def wait_start(first=''):
 
 def wait_stop():
     WAIT['on'] = False
+
+
+def choose_voice():
+    # meilleure voix francaise installee : hors ligne, qualite max, France en priorite
+    try:
+        from jnius import cast
+        it = TTS['eng'].getVoices().iterator()
+        best, bs = None, -100000
+        while it.hasNext():
+            o = it.next()
+            try:
+                v = cast('android.speech.tts.Voice', o)
+            except Exception:
+                v = o
+            loc = v.getLocale()
+            if str(loc.getLanguage()) != 'fr':
+                continue
+            net = bool(v.isNetworkConnectionRequired())
+            sc = int(v.getQuality()) * 10 + (60 if str(loc.getCountry()) == 'FR' else 0) - (4000 if net else 0)
+            log('voix fr : %s | q%d | reseau %s | score %d' % (v.getName(), v.getQuality(), net, sc))
+            if sc > bs:
+                best, bs = v, sc
+        if best is not None:
+            TTS['eng'].setVoice(best)
+            log('voix choisie : ' + str(best.getName()))
+        else:
+            log('voix fr : aucune trouvee')
+    except Exception:
+        log('voix: ' + traceback.format_exc()[-200:])
 
 
 def voice_set(p, v):
@@ -431,12 +461,23 @@ HIST = []
 _SENT = re.compile(r'(?<=[.!?…:;])\s+|\n+')
 
 
+REGLES_ORALES = (
+    " Tu parles comme dans une vraie conversation orale entre amis : 1 à 3 phrases courtes, "
+    "langage parlé naturel, tu peux dire « ouais », « bah », « en fait », « tiens ». "
+    "Va droit au but, sans formule d'assistant (pas de « bien sûr », pas de « excellente question »). "
+    "Ne dis jamais le prénom de la personne : dans une vraie conversation on ne répète pas le prénom de l'autre. "
+    "Ne répète pas la question. Réponds d'abord à ce qui est demandé, puis ajoute au plus une petite relance, "
+    "seulement si elle est naturelle. Pas de liste, pas d'émojis, pas de markdown. "
+    "Si tu ne sais pas, dis-le simplement."
+)
+
+
 def system_prompt():
     jours = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
     mois = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
     d = time.localtime()
     date = '%s %d %s %d' % (jours[d.tm_wday], d.tm_mday, mois[d.tm_mon - 1], d.tm_year)
-    return SYSTEM.format(date=date, heure=time.strftime('%H:%M', d))
+    return SYSTEM.replace('Jacques', 'celui qui te parle').format(date=date, heure=time.strftime('%H:%M', d)) + REGLES_ORALES
 
 
 def ask(text):
