@@ -57,18 +57,23 @@ def qtype(text):
     return 'autre'
 
 
-# (hauteur, vitesse, amorces dites pendant que le modele reflechit)
+# (hauteur, vitesse, phrases d'attente : UNE seule est dite)
 VOIX = {
-    'salut': (1.15, 1.10, ('Salut !', 'Hey !')),
-    'savoir': (1.00, 1.05, ('Alors...', 'Voyons...', 'Bonne question.')),
-    'avis': (0.90, 0.95, ('Hmm...', 'Bon...')),
-    'emotion': (0.88, 0.90, ('Hmm.', 'Je vois.')),
-    'commande': (1.05, 1.15, ("D'accord.", 'Ok.')),
-    'code': (0.95, 1.00, ('Voyons ça.',)),
-    'autre': (1.00, 1.05, ()),
+    'salut': (1.15, 1.10, ()),
+    'savoir': (1.00, 1.05, ('Bonne question.', 'Ah, intéressant.', 'Alors, voyons ça.')),
+    'avis': (0.90, 0.95, ('Hmm, laisse-moi réfléchir.', 'Bonne question, je réfléchis.')),
+    'emotion': (0.88, 0.90, ('Je vois.', "Je t'écoute.", 'Hmm, je comprends.')),
+    'commande': (1.05, 1.15, ("D'accord.", "Ok, je m'en occupe.")),
+    'code': (0.95, 1.00, ('Voyons ça.', 'Ok, je regarde.')),
+    'autre': (1.00, 1.05, ('Je vois.', 'Ah ok.')),
 }
+
+_LAST = {'a': ''}
 
 
 def amorce(kind):
     p, v, a = VOIX.get(kind, VOIX['autre'])
-    return p, v, (random.choice(a) if a else '')
+    pool = [x for x in a if x != _LAST['a']]
+    w = random.choice(pool) if pool else ''
+    _LAST['a'] = w
+    return p, v, w

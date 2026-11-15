@@ -206,7 +206,7 @@ def say(text):
         log('say: ' + traceback.format_exc()[-200:])
 
 
-WAIT_EARLY = True      # False = ne pas parler avant la transcription
+WAIT_EARLY = False      # False = ne pas parler avant la transcription
 WAIT = {'on': False, 'gen': 0, 'kind': 'autre', 'said': False, 'last': 0.0, 'word': ''}
 WAIT_GENERIC = ('Hmm...', 'Alors...', 'Voyons...', 'Attends...', 'Euh...')
 
@@ -252,7 +252,6 @@ def wait_start(first=''):
             wait_say(first)
         except Exception:
             pass
-    threading.Thread(target=wait_loop, args=(WAIT['gen'],), daemon=True).start()
 
 
 def wait_stop():
