@@ -206,6 +206,14 @@ def say(text):
         log('say: ' + traceback.format_exc()[-200:])
 
 
+def voice_set(p, v):
+    try:
+        TTS['eng'].setPitch(float(p))
+        TTS['eng'].setSpeechRate(float(v))
+    except Exception:
+        pass
+
+
 def tts_stop():
     try:
         TTS['eng'].stop()
@@ -439,6 +447,7 @@ def settle(spoken):
     if spoken:
         tts_wait()
     Ears.setMuted(False)
+    voice_set(1.0, 1.05)
     S['active_until'] = time.time() + ACTIVE_WINDOW
     S['last_talk'] = time.time()
     push_state(phase='veille', awake=True, level=0.0, force=True)
@@ -468,7 +477,11 @@ def handle(info):
                 log('  -> ignore (bruit)')
                 push_state(phase='veille', awake=awake(), force=True)
                 return
+            text = router.fix_name(text)
             called, cmd = split_wake(text)
+            w0 = text.split()[0].lower().strip(',.!?') if text.split() else ''
+            if called and not cmd and w0 in ('bonjour', 'salut', 'coucou', 'hello', 'bonsoir', 'hey'):
+                cmd = w0
             cmd = cmd if called else text
         else:
             # passe rapide : le nom de Niko est-il dit au debut ? Sinon on ne transcrit pas le reste (gain de temps)
@@ -521,8 +534,16 @@ def handle(info):
         settle(False)
         return
     try:
-        log('role: ' + router.role(cmd))
+        kind = router.qtype(cmd)
+        p, v, amo = router.amorce(kind)
+        log('role: %s | voix %.2f x%.2f' % (kind, p, v))
+        voice_set(p, v)
+        if amo:
+            Ears.setMuted(True)
+            push_state(phase='parle', force=True)
+            say(amo)
         _, spoken = ask(cmd)
+        spoken = spoken or bool(amo)
     except Exception:
         log('qwen: ' + traceback.format_exc()[-200:])
         Ears.setMuted(True)
