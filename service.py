@@ -373,7 +373,121 @@ def vosk_prepare():
         log('vosk: ' + traceback.format_exc()[-200:])
 
 
+ASR_DIR = os.path.join(DATA, 'models', 'sherpa-fr')
+ASR_URL = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-fr-2023-04-14.tar.bz2'
+ASR = {'ok': False, 'busy': False}
+try:
+    AsrJ = autoclass('org.jacques.julia.Asr')
+except Exception:
+    AsrJ = None
+
+
+def asr_have():
+    try:
+        fs = os.listdir(ASR_DIR)
+    except Exception:
+        return False
+
+    def has(p):
+        return any(f.startswith(p) and f.endswith('.onnx') for f in fs)
+    return 'tokens.txt' in fs and has('encoder') and has('decoder') and has('joiner')
+
+
+def asr_on_wifi():
+    try:
+        cm = PythonService.mService.getSystemService('connectivity')
+        caps = cm.getNetworkCapabilities(cm.getActiveNetwork())
+        return bool(caps.hasTransport(1))
+    except Exception:
+        return True
+
+
+def asr_download():
+    import shutil
+    import tarfile
+    part = ASR_DIR + '.part'
+    tmp = ASR_DIR + '.tar.bz2'
+    shutil.rmtree(part, ignore_errors=True)
+    os.makedirs(part)
+    log('asr: telechargement du modele francais (398 Mo)')
+    r = urllib.request.urlopen(ASR_URL, timeout=60, context=(brain.ctx() if brain else None))
+    done, last = 0, time.time()
+    with open(tmp, 'wb') as f:
+        while True:
+            b = r.read(1 << 20)
+            if not b:
+                break
+            f.write(b)
+            done += len(b)
+            if time.time() - last > 120:
+                last = time.time()
+                log('asr: %d Mo recus' % (done >> 20))
+    log('asr: extraction')
+    with tarfile.open(tmp, 'r|bz2') as t:
+        for m in t:
+            n = os.path.basename(m.name)
+            ok = n == 'tokens.txt' or (n.endswith('.onnx') and n.split('-')[0] in ('encoder', 'decoder', 'joiner'))
+            if m.isfile() and ok:
+                src = t.extractfile(m)
+                with open(os.path.join(part, n), 'wb') as o:
+                    shutil.copyfileobj(src, o)
+    os.remove(tmp)
+    fs = os.listdir(part)
+    if any(f.startswith('encoder') and '.int8.' in f for f in fs):
+        for f in fs:
+            if f.startswith('encoder') and '.int8.' not in f:
+                os.remove(os.path.join(part, f))
+    shutil.rmtree(ASR_DIR, ignore_errors=True)
+    os.rename(part, ASR_DIR)
+    log('asr: modele pret : ' + ', '.join(sorted(os.listdir(ASR_DIR))))
+
+
+def asr_prepare():
+    if ASR['busy']:
+        return
+    ASR['busy'] = True
+    try:
+        if AsrJ is None:
+            log('asr: classe Asr absente (on reste sur Vosk)')
+            return
+        if not asr_have():
+            while not asr_on_wifi():
+                log('asr: pas de Wi-Fi, on attend avant de telecharger 398 Mo')
+                time.sleep(300)
+            asr_download()
+        res = str(AsrJ.load(ASR_DIR))
+        ASR['ok'] = (res == 'ok')
+        log('asr: ' + res)
+    except Exception:
+        log('asr: ' + traceback.format_exc()[-200:])
+    finally:
+        ASR['busy'] = False
+
+
+def asr_text(path, from_ms=0):
+    # meme forme que vosk_text : (texte, ms, cpu_ms) ou None si sherpa n'est pas pret
+    if not (ASR['ok'] and AsrJ is not None):
+        return None
+    try:
+        j = json.loads(str(AsrJ.transcribeFrom(path, int(from_ms))))
+    except Exception:
+        log('asr: ' + traceback.format_exc()[-200:])
+        return None
+    if 'err' in j:
+        log('asr: ' + str(j['err'])[:150])
+        return None
+    log('  moteur : sherpa')
+    return str(j.get('text', '')).strip().lower(), int(j.get('ms', 0)), int(j.get('cpu', 0))
+
+
 def vosk_text(path, from_ms=0):
+    r = asr_text(path, from_ms)
+    if r is not None:
+        return r
+    return vosk_text_old(path, from_ms)
+
+
+def vosk_text_old(path, from_ms=0):
     """Transcription libre, a partir de from_ms. Renvoie (texte, ms, cpu_ms) ou None si Vosk a plante."""
     try:
         if from_ms > 0:
@@ -700,6 +814,7 @@ def main():
     tts_make()
     threading.Thread(target=guard, daemon=True).start()
     threading.Thread(target=vosk_prepare, daemon=True).start()
+    threading.Thread(target=asr_prepare, daemon=True).start()
     started = False
     last_chk = 0.0
     while True:
