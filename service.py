@@ -402,41 +402,46 @@ def asr_on_wifi():
         return True
 
 
+ASR_REPO = 'shaojieli/sherpa-onnx-streaming-zipformer-fr-2023-04-14'
+
+
 def asr_download():
     import shutil
-    import tarfile
+    old = ASR_DIR + '.tar.bz2'
+    if os.path.exists(old):
+        os.remove(old)          # reste de l'ancien essai (398 Mo)
     part = ASR_DIR + '.part'
-    tmp = ASR_DIR + '.tar.bz2'
     shutil.rmtree(part, ignore_errors=True)
     os.makedirs(part)
-    log('asr: telechargement du modele francais (398 Mo)')
-    r = urllib.request.urlopen(ASR_URL, timeout=60, context=(brain.ctx() if brain else None))
-    done, last = 0, time.time()
-    with open(tmp, 'wb') as f:
-        while True:
-            b = r.read(1 << 20)
-            if not b:
-                break
-            f.write(b)
-            done += len(b)
-            if time.time() - last > 120:
-                last = time.time()
-                log('asr: %d Mo recus' % (done >> 20))
-    log('asr: extraction')
-    with tarfile.open(tmp, 'r|bz2') as t:
-        for m in t:
-            n = os.path.basename(m.name)
-            ok = n == 'tokens.txt' or (n.endswith('.onnx') and n.split('-')[0] in ('encoder', 'decoder', 'joiner'))
-            if m.isfile() and ok:
-                src = t.extractfile(m)
-                with open(os.path.join(part, n), 'wb') as o:
-                    shutil.copyfileobj(src, o)
-    os.remove(tmp)
-    fs = os.listdir(part)
-    if any(f.startswith('encoder') and '.int8.' in f for f in fs):
-        for f in fs:
-            if f.startswith('encoder') and '.int8.' not in f:
-                os.remove(os.path.join(part, f))
+    ctx = brain.ctx() if brain else None
+    base = 'https://huggingface.co/'
+    r = urllib.request.urlopen(base + 'api/models/' + ASR_REPO, timeout=60, context=ctx)
+    names = [x['rfilename'] for x in json.loads(r.read().decode('utf-8')).get('siblings', [])]
+    log('asr: fichiers du depot : ' + ', '.join(n for n in names if n.endswith('.onnx') or n == 'tokens.txt'))
+
+    def choose(prefix, want_int8):
+        c = [n for n in names if '/' not in n and n.startswith(prefix) and n.endswith('.onnx')]
+        pref = [n for n in c if ('.int8.' in n) == want_int8]
+        return (pref or c or [None])[0]
+
+    todo = [choose('encoder', True), choose('decoder', False), choose('joiner', False),
+            'tokens.txt' if 'tokens.txt' in names else None]
+    if None in todo:
+        raise RuntimeError('fichiers du modele introuvables : %s' % todo)
+    for n in todo:
+        log('asr: telechargement ' + n)
+        r = urllib.request.urlopen(base + ASR_REPO + '/resolve/main/' + n, timeout=60, context=ctx)
+        done, last = 0, time.time()
+        with open(os.path.join(part, n), 'wb') as f:
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                f.write(chunk)
+                done += len(chunk)
+                if time.time() - last > 60:
+                    last = time.time()
+                    log('asr: %s : %d Mo' % (n, done >> 20))
     shutil.rmtree(ASR_DIR, ignore_errors=True)
     os.rename(part, ASR_DIR)
     log('asr: modele pret : ' + ', '.join(sorted(os.listdir(ASR_DIR))))
