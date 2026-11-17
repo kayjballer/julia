@@ -146,19 +146,15 @@ def on_picked(request, result, intent):
         log('import: ' + repr(e))
 
 
-def open_picker():
+def open_picker(host='127.0.0.1'):
     try:
         from jnius import autoclass
-        from android import mActivity, activity
-        if not IMPORT['bound']:
-            activity.bind(on_activity_result=on_picked)
-            IMPORT['bound'] = True
+        from android import mActivity
         Intent = autoclass('android.content.Intent')
-        it = Intent(Intent.ACTION_OPEN_DOCUMENT)
-        it.addCategory(Intent.CATEGORY_OPENABLE)
-        it.setType('*/*')
-        it.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, True)
-        mActivity.startActivityForResult(it, 4242)
+        Uri = autoclass('android.net.Uri')
+        it = Intent(Intent.ACTION_VIEW, Uri.parse('http://%s/import.html' % host))
+        it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        mActivity.startActivity(it)
         return True
     except Exception as e:
         log('picker: ' + repr(e))
@@ -183,6 +179,34 @@ class H(SimpleHTTPRequestHandler):
                     f.write(t)
                 os.replace(tmp, os.path.join(DATA, 'niko_say.txt'))
             self.send_response(200)
+        elif self.path.split('?')[0] == '/api/upload':
+            import re as _re
+            from urllib.parse import urlparse, parse_qs, unquote
+            q = parse_qs(urlparse(self.path).query)
+            name = os.path.basename(unquote((q.get('name') or [''])[0]))
+            name = _re.sub(r'[^A-Za-z0-9._ -]', '_', name)[:80] or ('fichier_%d' % int(time.time()))
+            n = int(self.headers.get('Content-Length', 0) or 0)
+            ext = name.lower().rsplit('.', 1)[-1] if '.' in name else ''
+            d = os.path.join(DATA, 'docs' if ext in ('txt', 'md') else 'media')
+            os.makedirs(d, exist_ok=True)
+            tmp = os.path.join(DATA, 'upload.tmp')
+            ok = False
+            try:
+                left = n
+                with open(tmp, 'wb') as f:
+                    while left > 0:
+                        b = self.rfile.read(min(left, 1 << 16))
+                        if not b:
+                            break
+                        f.write(b)
+                        left -= len(b)
+                if left == 0:
+                    os.replace(tmp, os.path.join(d, name))
+                    open(os.path.join(DATA, 'kb_reindex.flag'), 'w').write('1')
+                    ok = True
+            except Exception as e:
+                log('upload: ' + repr(e))
+            self.send_response(200 if ok else 500)
         else:
             self.send_response(404)
         self.send_header('Content-Length', '0')
@@ -190,7 +214,7 @@ class H(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.split('?')[0] == '/api/import':
-            b = json.dumps({'ok': open_picker()}).encode()
+            b = json.dumps({'ok': open_picker(self.headers.get('Host') or '127.0.0.1')}).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(b)))
