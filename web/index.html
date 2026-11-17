@@ -36,6 +36,11 @@
   }
   #debug.visible { display: block; }
   @media (prefers-reduced-motion: reduce) { #statut { transition: none; } }
+  #ecrire { position: fixed; top: calc(env(safe-area-inset-top, 0px) + .8rem); right: .8rem; z-index: 6; width: 2.6rem; height: 2.6rem; border-radius: 50%; border: 1px solid var(--discret); background: rgba(7,8,13,.6); color: var(--texte); font-size: 1.2rem; }
+  #saisie { display: none; position: fixed; top: calc(env(safe-area-inset-top, 0px) + .8rem); left: .8rem; right: 4rem; z-index: 6; gap: .5rem; }
+  #saisie.ouvert { display: flex; }
+  #champ { flex: 1; min-width: 0; height: 2.6rem; border-radius: 1.3rem; border: 1px solid var(--discret); background: rgba(7,8,13,.9); color: var(--texte); padding: 0 1rem; font-size: 1rem; -webkit-user-select: text; user-select: text; }
+  #envoyer { height: 2.6rem; border-radius: 1.3rem; border: 0; background: var(--voix); color: var(--nuit); padding: 0 1rem; font-size: 1rem; }
 </style>
 </head>
 <body>
@@ -229,6 +234,22 @@ document.addEventListener('click', function() {
     rafraichirDebug();
   }
 });
+</script>
+<button id="ecrire" aria-label="Écrire">✎</button>
+<div id="saisie"><input id="champ" type="text" placeholder="Écrire à Niko…" enterkeyhint="send" autocomplete="off"><button id="envoyer">Envoyer</button></div>
+<script>
+(function () {
+  var b = document.getElementById('ecrire'), s = document.getElementById('saisie');
+  var c = document.getElementById('champ'), e = document.getElementById('envoyer');
+  function envoyer() {
+    var t = c.value.trim(); if (!t) return;
+    fetch('/api/say', { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: t }).catch(function () {});
+    c.value = ''; s.classList.remove('ouvert'); c.blur();
+  }
+  b.addEventListener('click', function () { s.classList.toggle('ouvert'); if (s.classList.contains('ouvert')) c.focus(); });
+  e.addEventListener('click', envoyer);
+  c.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); envoyer(); } });
+})();
 </script>
 </body>
 </html>

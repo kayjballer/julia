@@ -697,8 +697,13 @@ def handle_inner(info):
         dur, info.get('lvl', 0), info.get('pk', 0), info.get('g', 1), info.get('nz', 0)))
     push_state(phase='reflexion', force=True)
     called, cmd = False, ''
+    typed = (info.get('text') or '').strip()
     try:
-        if awake():
+        if typed:
+            called, cmd = True, typed
+            push_state(awake=True, force=True)
+            wait_start()
+        elif awake():
             # Niko vient de parler : on peut lui repondre sans redire son nom -> transcription libre de toute la phrase
             r = vosk_text(path)
             if r is None:
@@ -848,6 +853,17 @@ def main():
                 push_state(phase='ecoute' if Ears.voice() else 'veille', level=float(Ears.level()))
             elif STATE['phase'] == 'ecoute':
                 push_state(phase='ecoute' if Ears.voice() else 'veille', level=float(Ears.level()))
+            sp = os.path.join(DATA, 'niko_say.txt')
+            if os.path.exists(sp) and G['ready'] and TTS['ready']:
+                try:
+                    with open(sp, encoding='utf-8') as f:
+                        txt = f.read().strip()
+                    os.remove(sp)
+                    if txt:
+                        log('texte ecrit : "%s"' % txt)
+                        handle({'text': txt})
+                except Exception:
+                    log('ecrit: ' + traceback.format_exc()[-200:])
             ev = Ears.poll()
             if ev is None:
                 time.sleep(0.04)

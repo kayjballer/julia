@@ -90,6 +90,21 @@ class H(SimpleHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-cache')
         super().end_headers()
 
+    def do_POST(self):
+        if self.path.split('?')[0] == '/api/say':
+            n = int(self.headers.get('Content-Length', 0) or 0)
+            t = self.rfile.read(min(n, 2000)).decode('utf-8', 'replace').strip()
+            if t:
+                tmp = os.path.join(DATA, 'niko_say.tmp')
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    f.write(t)
+                os.replace(tmp, os.path.join(DATA, 'niko_say.txt'))
+            self.send_response(200)
+        else:
+            self.send_response(404)
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+
     def do_GET(self):
         if self.path.split('?')[0] == '/api/state':
             st = read_state()
