@@ -599,8 +599,32 @@ def system_prompt():
     return SYSTEM.replace('Jacques', 'celui qui te parle').format(date=date, heure=time.strftime('%H:%M', d)) + REGLES_ORALES
 
 
+def kb_context(q):
+    try:
+        import kb
+        c = kb.context(q)
+        return ('\n\nNotes enregistrees par ton utilisateur, a utiliser seulement si elles sont utiles a la question :\n' + c) if c else ''
+    except Exception:
+        return ''
+
+
+def kb_index():
+    try:
+        import kb, brain
+        for _ in range(120):
+            if brain.emb_alive():
+                break
+            time.sleep(5)
+        else:
+            return
+        kb.index_docs()
+        log('base de connaissances prete')
+    except Exception:
+        log('kb: ' + traceback.format_exc()[-200:])
+
+
 def ask(text):
-    msgs = [{'role': 'system', 'content': system_prompt()}] + HIST[-8:] + [{'role': 'user', 'content': text}]
+    msgs = [{'role': 'system', 'content': system_prompt() + kb_context(text)}] + HIST[-8:] + [{'role': 'user', 'content': text}]
     body = json.dumps({'messages': msgs, 'max_tokens': MAX_TOKENS, 'temperature': 1.0, 'top_p': 0.95, 'top_k': 64,
                        'stream': True, 'cache_prompt': True}).encode()
     req = urllib.request.Request(LLM_URL, data=body, headers={'Content-Type': 'application/json'})
@@ -770,6 +794,21 @@ def handle_inner(info):
         push_state(phase='parle', force=True)
         settle(True)
         return
+    import re as _re
+    mk = _re.match(r"^\s*(?:retiens bien|retiens|souviens[- ]toi|memorise|mémorise|note)\s*(?:que|:|,)?\s+(.+)$", cmd or '', _re.I | _re.S)
+    if mk:
+        wait_stop()
+        Ears.setMuted(True)
+        try:
+            import kb
+            ok = kb.add(mk.group(1))
+        except Exception:
+            log('kb: ' + traceback.format_exc()[-200:])
+            ok = False
+        say("C'est noté." if ok else "Je n'ai pas réussi à le retenir.")
+        push_state(phase='parle', force=True)
+        settle(True)
+        return
     if norm(cmd) in STOP:
         tts_stop()
         settle(False)
@@ -825,6 +864,7 @@ def main():
     threading.Thread(target=guard, daemon=True).start()
     threading.Thread(target=vosk_prepare, daemon=True).start()
     threading.Thread(target=asr_prepare, daemon=True).start()
+    threading.Thread(target=kb_index, daemon=True).start()
     started = False
     last_chk = 0.0
     while True:
