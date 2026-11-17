@@ -619,6 +619,18 @@ def kb_index():
             return
         kb.index_docs()
         log('base de connaissances prete')
+        import threading
+        def _niko_watch():
+            while True:
+                time.sleep(15)
+                try:
+                    import dossier_niko
+                    if dossier_niko.has_access() and brain.emb_alive():
+                        os.makedirs('/sdcard/Niko', exist_ok=True)
+                        kb.index_docs()
+                except Exception:
+                    log('niko dossier: ' + traceback.format_exc()[-200:])
+        threading.Thread(target=_niko_watch, daemon=True).start()
     except Exception:
         log('kb: ' + traceback.format_exc()[-200:])
 
