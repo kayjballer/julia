@@ -624,8 +624,8 @@ def kb_index():
 
 
 def ask(text):
-    msgs = [{'role': 'system', 'content': system_prompt() + kb_context(text)}] + HIST[-8:] + [{'role': 'user', 'content': text}]
-    body = json.dumps({'messages': msgs, 'max_tokens': MAX_TOKENS, 'temperature': 1.0, 'top_p': 0.95, 'top_k': 64,
+    msgs = [{'role': 'system', 'content': system_prompt() + " Si tu n'es pas sûr d'un fait (date, nom, chiffre), dis que tu ne sais pas au lieu d'inventer." + kb_context(text)}] + HIST[-8:] + [{'role': 'user', 'content': text}]
+    body = json.dumps({'messages': msgs, 'max_tokens': MAX_TOKENS, 'temperature': 0.4, 'top_p': 0.85, 'top_k': 30,
                        'stream': True, 'cache_prompt': True}).encode()
     req = urllib.request.Request(LLM_URL, data=body, headers={'Content-Type': 'application/json'})
     full, buf, spoken = '', '', False
