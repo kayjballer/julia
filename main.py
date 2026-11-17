@@ -82,6 +82,89 @@ def debug_text():
         '--- main.log', tail('main.log', 8)])
 
 
+IMPORT = {'bound': False}
+
+
+def _display_name(cr, uri):
+    try:
+        cur = cr.query(uri, None, None, None, None)
+        if cur is not None:
+            try:
+                i = cur.getColumnIndex('_display_name')
+                if i >= 0 and cur.moveToFirst():
+                    return cur.getString(i)
+            finally:
+                cur.close()
+    except Exception:
+        pass
+    return ''
+
+
+def on_picked(request, result, intent):
+    if request != 4242:
+        return
+    try:
+        if result != -1 or intent is None:
+            return
+        import re as _re
+        from jnius import autoclass
+        from android import mActivity
+        File = autoclass('java.io.File')
+        FOS = autoclass('java.io.FileOutputStream')
+        FileUtils = autoclass('android.os.FileUtils')
+        cr = mActivity.getContentResolver()
+        uris = []
+        clip = intent.getClipData()
+        if clip is not None:
+            for i in range(clip.getItemCount()):
+                uris.append(clip.getItemAt(i).getUri())
+        else:
+            u = intent.getData()
+            if u is not None:
+                uris.append(u)
+        n_ok = 0
+        for u in uris:
+            name = os.path.basename(_display_name(cr, u) or '') or ('fichier_%d' % int(time.time()))
+            name = _re.sub(r'[^A-Za-z0-9._ -]', '_', name)[:80]
+            ext = name.lower().rsplit('.', 1)[-1] if '.' in name else ''
+            sub = 'docs' if ext in ('txt', 'md') else 'media'
+            d = os.path.join(DATA, sub)
+            os.makedirs(d, exist_ok=True)
+            dest = os.path.join(d, name)
+            ins = cr.openInputStream(u)
+            outs = FOS(File(dest))
+            try:
+                FileUtils.copy(ins, outs)
+            finally:
+                ins.close()
+                outs.close()
+            n_ok += 1
+        if n_ok:
+            open(os.path.join(DATA, 'kb_reindex.flag'), 'w').write('1')
+        log('import: %d fichier(s)' % n_ok)
+    except Exception as e:
+        log('import: ' + repr(e))
+
+
+def open_picker():
+    try:
+        from jnius import autoclass
+        from android import mActivity, activity
+        if not IMPORT['bound']:
+            activity.bind(on_activity_result=on_picked)
+            IMPORT['bound'] = True
+        Intent = autoclass('android.content.Intent')
+        it = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        it.addCategory(Intent.CATEGORY_OPENABLE)
+        it.setType('*/*')
+        it.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, True)
+        mActivity.startActivityForResult(it, 4242)
+        return True
+    except Exception as e:
+        log('picker: ' + repr(e))
+        return False
+
+
 class H(SimpleHTTPRequestHandler):
     def __init__(self, *a, **k):
         super().__init__(*a, directory=BASE, **k)
@@ -106,6 +189,14 @@ class H(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if self.path.split('?')[0] == '/api/import':
+            b = json.dumps({'ok': open_picker()}).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
         if self.path.split('?')[0] == '/api/state':
             st = read_state()
             try:

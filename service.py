@@ -893,6 +893,13 @@ def main():
                 push_state(phase='ecoute' if Ears.voice() else 'veille', level=float(Ears.level()))
             elif STATE['phase'] == 'ecoute':
                 push_state(phase='ecoute' if Ears.voice() else 'veille', level=float(Ears.level()))
+            rf = os.path.join(DATA, 'kb_reindex.flag')
+            if os.path.exists(rf):
+                try:
+                    os.remove(rf)
+                except Exception:
+                    pass
+                threading.Thread(target=kb_index, daemon=True).start()
             sp = os.path.join(DATA, 'niko_say.txt')
             if os.path.exists(sp) and G['ready'] and TTS['ready']:
                 try:

@@ -85,6 +85,36 @@ def index_docs():
             except Exception:
                 pass
     c.close()
+    index_media()
+
+
+def index_media():
+    d = os.path.join(brain.DATA, 'media')
+    try:
+        names = sorted(os.listdir(d))
+    except Exception:
+        return
+    kinds = {'photo': ('jpg', 'jpeg', 'png', 'webp', 'heic', 'gif'), 'video': ('mp4', 'mkv', '3gp', 'webm', 'mov'),
+             'audio': ('mp3', 'm4a', 'wav', 'ogg', 'aac'), 'document': ('pdf', 'doc', 'docx', 'odt', 'xls', 'xlsx', 'ppt', 'pptx')}
+    c = _db()
+    for n in names:
+        p = os.path.join(d, n)
+        try:
+            mt = os.path.getmtime(p)
+            row = c.execute('SELECT mtime FROM docs WHERE path=?', (p,)).fetchone()
+            if row and row[0] == mt:
+                continue
+            ext = n.lower().rsplit('.', 1)[-1] if '.' in n else ''
+            kind = next((k for k, v in kinds.items() if ext in v), 'fichier')
+            txt = 'Fichier enregistre dans la memoire de Niko : %s (%s)' % (n, kind)
+            v = embed(txt)
+            c.execute('DELETE FROM chunks WHERE src=?', ('media:' + p,))
+            c.execute('INSERT INTO chunks (src, txt, vec, ts) VALUES (?,?,?,?)', ('media:' + p, txt, v.tobytes(), time.time()))
+            c.execute('REPLACE INTO docs (path, mtime) VALUES (?,?)', (p, mt))
+            c.commit()
+        except Exception:
+            pass
+    c.close()
 
 
 def search(q, k=3):

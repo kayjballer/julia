@@ -41,6 +41,7 @@
   #saisie.ouvert { display: flex; }
   #champ { flex: 1; min-width: 0; height: 2.6rem; border-radius: 1.3rem; border: 1px solid var(--discret); background: rgba(7,8,13,.9); color: var(--texte); padding: 0 1rem; font-size: 1rem; -webkit-user-select: text; user-select: text; }
   #envoyer { height: 2.6rem; border-radius: 1.3rem; border: 0; background: var(--voix); color: var(--nuit); padding: 0 1rem; font-size: 1rem; }
+  #importer { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 4rem); right: .8rem; z-index: 6; width: 2.6rem; height: 2.6rem; border-radius: 50%; border: 1px solid var(--discret); background: rgba(7,8,13,.6); color: var(--texte); font-size: 1.4rem; }
 </style>
 </head>
 <body>
@@ -236,6 +237,7 @@ document.addEventListener('click', function() {
 });
 </script>
 <button id="ecrire" aria-label="Écrire">✎</button>
+<button id="importer" aria-label="Importer">+</button>
 <div id="saisie"><input id="champ" type="text" placeholder="Écrire à Niko…" enterkeyhint="send" autocomplete="off"><button id="envoyer">Envoyer</button></div>
 <script>
 (function () {
@@ -248,6 +250,7 @@ document.addEventListener('click', function() {
   }
   b.addEventListener('click', function () { s.classList.toggle('ouvert'); if (s.classList.contains('ouvert')) c.focus(); });
   e.addEventListener('click', envoyer);
+  document.getElementById('importer').addEventListener('click', function () { fetch('/api/import', { cache: 'no-store' }).catch(function () {}); });
   c.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); envoyer(); } });
 })();
 </script>
