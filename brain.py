@@ -10,12 +10,12 @@ def ctx():
         return ssl.create_default_context()
 
 # ancien Qwen 2B : HauhauCS/Qwen3.5-2B-Uncensored-HauhauCS-Aggressive, 1270808032 octets, qwen35-2b-unc.gguf
-URL = 'https://huggingface.co/Hasaranga85/Llama-3.2-3B-Instruct-abliterated-Q4_K_M-GGUF/resolve/main/llama-3.2-3b-instruct-abliterated-q4_k_m.gguf'
+URL = 'https://huggingface.co/HauhauCS/Qwen3.5-2B-Uncensored-HauhauCS-Aggressive/resolve/main/Qwen3.5-2B-Uncensored-HauhauCS-Aggressive-Q6_K.gguf'
 SIZE = 806057920
 PORT = 8080
 ST = {'stage': 'init', 'pct': 0, 'err': ''}
 DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
-MODEL = os.path.join(DATA, 'models', 'llama32-3b-unc.gguf')
+MODEL = os.path.join(DATA, 'models', 'qwen35-2b-unc.gguf')
 LOG = os.path.join(DATA, 'llama.log')
 EMB_REPO = 'PeterAM4/Qwen3-Embedding-0.6B-GGUF'
 EMB_PORT = 8082
@@ -214,7 +214,7 @@ def ensure():
                     return
                 time.sleep(1)
         out = open(LOG, 'ab')
-        subprocess.Popen([b, '-m', m, '-t', '4', '-c', '2048', '-np', '1', '-fa', 'on', '-lm', 'none', '--chat-template-kwargs', '{"enable_thinking": false}',
+        subprocess.Popen([b, '-m', m, '-t', '4', '-c', '4096', '-np', '1', '-fa', 'on', '-lm', 'none', '--chat-template-kwargs', '{"enable_thinking": false}',
                           '--host', '127.0.0.1', '--port', str(PORT)],
                          stdout=out, stderr=subprocess.STDOUT)
         for _ in range(120):
