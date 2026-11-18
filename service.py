@@ -610,26 +610,39 @@ def kb_context(q):
 
 def kb_index():
     try:
-        import kb, brain
-        for _ in range(120):
-            if brain.emb_alive():
-                break
-            time.sleep(5)
-        else:
-            return
-        kb.index_docs()
-        log('base de connaissances prete')
-        import threading
+        import kb, brain, threading
+
+        def _etat():
+            fin = ''
+            try:
+                with open(brain.EMB_LOG, 'rb') as f:
+                    f.seek(0, 2)
+                    f.seek(max(0, f.tell() - 300))
+                    fin = f.read().decode('utf-8', 'replace').replace('\n', ' | ')
+            except Exception:
+                pass
+            return 'embedding ' + repr(brain.EMB) + ' ' + fin
+
         def _niko_watch():
+            pret = False
+            n = 0
             while True:
-                time.sleep(15)
                 try:
                     import dossier_niko
-                    if dossier_niko.has_access() and brain.emb_alive():
+                    if dossier_niko.has_access():
                         os.makedirs('/sdcard/Niko', exist_ok=True)
+                    if brain.emb_alive():
                         kb.index_docs()
+                        if not pret:
+                            pret = True
+                            log('base de connaissances prete')
+                    elif n % 4 == 0:
+                        log(_etat())
                 except Exception:
                     log('niko dossier: ' + traceback.format_exc()[-200:])
+                n += 1
+                time.sleep(15)
+
         threading.Thread(target=_niko_watch, daemon=True).start()
     except Exception:
         log('kb: ' + traceback.format_exc()[-200:])
