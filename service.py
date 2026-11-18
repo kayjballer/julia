@@ -626,6 +626,7 @@ def kb_index():
         def _niko_watch():
             pret = False
             n = 0
+            dernier = 0
             while True:
                 try:
                     import dossier_niko
@@ -636,8 +637,16 @@ def kb_index():
                         if not pret:
                             pret = True
                             log('base de connaissances prete')
-                    elif n % 4 == 0:
-                        log(_etat())
+                    else:
+                        if (brain.EMB.get('stage') in ('off', 'error')
+                                and brain.alive()
+                                and time.time() - dernier > 300):
+                            dernier = time.time()
+                            log('embedding: lancement')
+                            threading.Thread(target=brain.ensure_emb,
+                                             daemon=True).start()
+                        if n % 4 == 0:
+                            log(_etat())
                 except Exception:
                     log('niko dossier: ' + traceback.format_exc()[-200:])
                 n += 1
