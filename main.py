@@ -157,21 +157,6 @@ def on_picked(request, result, intent):
         log('import: ' + repr(e))
 
 
-def open_picker(host='127.0.0.1'):
-    try:
-        from jnius import autoclass
-        from android import mActivity
-        Intent = autoclass('android.content.Intent')
-        Uri = autoclass('android.net.Uri')
-        it = Intent(Intent.ACTION_VIEW, Uri.parse('http://%s/import.html' % host))
-        it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        mActivity.startActivity(it)
-        return True
-    except Exception as e:
-        log('picker: ' + repr(e))
-        return False
-
-
 class H(SimpleHTTPRequestHandler):
     def __init__(self, *a, **k):
         super().__init__(*a, directory=BASE, **k)
@@ -225,7 +210,7 @@ class H(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.split('?')[0] == '/api/import':
-            b = json.dumps({'ok': open_picker(self.headers.get('Host') or '127.0.0.1')}).encode()
+            b = json.dumps({'ok': False}).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(b)))

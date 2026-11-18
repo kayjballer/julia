@@ -237,7 +237,7 @@ document.addEventListener('click', function() {
 });
 </script>
 <button id="ecrire" aria-label="Écrire">✎</button>
-<button id="importer" aria-label="Importer">+</button>
+
 <div id="saisie"><input id="champ" type="text" placeholder="Écrire à Niko…" enterkeyhint="send" autocomplete="off"><button id="envoyer">Envoyer</button></div>
 <script>
 (function () {
@@ -250,7 +250,6 @@ document.addEventListener('click', function() {
   }
   b.addEventListener('click', function () { s.classList.toggle('ouvert'); if (s.classList.contains('ouvert')) c.focus(); });
   e.addEventListener('click', envoyer);
-  document.getElementById('importer').addEventListener('click', function () { fetch('/api/import', { cache: 'no-store' }).catch(function () {}); });
   c.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); envoyer(); } });
 })();
 </script>
