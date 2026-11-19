@@ -231,3 +231,12 @@ def ensure():
     except Exception as e:
         ST['stage'], ST['err'] = 'error', repr(e)
         log(repr(e))
+
+
+# Niko : plus de serveur d'embedding (RAG par SQLite FTS5, voir kb.py)
+def emb_alive():
+    return True
+
+
+def ensure_emb():
+    EMB['stage'] = 'ready'
