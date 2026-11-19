@@ -176,3 +176,39 @@ def context(q):
         return '\n'.join('- ' + t for s, t in search(q))
     except Exception:
         return ''
+
+
+_SYN = {
+    'nom': 'appelle prenom',
+    'prenom': 'appelle nom',
+    'sport': 'basket foot joue joueur entrainement',
+    'pratique': 'joue',
+    'age': 'ans ne naissance',
+    'taille': 'cm mesure',
+    'poids': 'kg',
+    'habite': 'ville vit adresse',
+    'travail': 'metier boulot job',
+    'metier': 'travail job',
+    'telephone': 'numero',
+}
+_search0 = search
+_log = getattr(brain, 'log', lambda m: None)
+
+
+def search(q, k=3):
+    extra = []
+    for w in re.findall(r'\w+', _norm(q)):
+        extra += _SYN.get(w, '').split()
+    return _search0(q + ' ' + ' '.join(extra), k)
+
+
+def context(q):
+    if len(q.strip()) < 4:
+        return ''
+    try:
+        r = search(q)
+        _log('kb: %d resultat(s) pour %r' % (len(r), q[:60]))
+        return '\n'.join('- ' + t for s, t in r)
+    except Exception as e:
+        _log('kb erreur: ' + repr(e))
+        return ''
