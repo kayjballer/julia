@@ -1,11 +1,25 @@
 import os, re, sqlite3, time, unicodedata
 import brain
 
+try:
+    import router
+except Exception:
+    router = None
+
 DB = os.path.join(brain.DATA, 'niko_kb.db')
 DIRS = [os.path.join(brain.DATA, 'docs'), '/sdcard/Niko']
-MIN_HITS = 1
+MAX_CTX = 600
+SKIP = ('salut', 'commande', 'code')
 STOP = set('le la les un une des du de et que qui quoi est sont pas pour dans sur avec ce cette ces mon ma mes ton ta tes son sa ses nous vous ils elles je tu il elle on ne se me te lui en au aux ou mais donc car comme plus tres tout tous fait faire peux peut veux veut dis dit parle niko quel quelle quels comment pourquoi'.split())
+_SYN = {
+    'nom': 'appelle prenom', 'prenom': 'appelle nom',
+    'sport': 'basket foot joue joueur entrainement', 'pratique': 'joue',
+    'age': 'ans ne naissance', 'taille': 'cm mesure', 'poids': 'kg',
+    'habite': 'ville vit adresse', 'travail': 'metier boulot job',
+    'metier': 'travail job', 'telephone': 'numero',
+}
 _FTS = {'ok': None}
+_log = getattr(brain, 'log', lambda m: None)
 
 
 def _norm(s):
@@ -13,8 +27,7 @@ def _norm(s):
 
 
 def _migrate(c):
-    n = c.execute('SELECT count(*) FROM fts').fetchone()[0]
-    if n == 0:
+    if c.execute('SELECT count(*) FROM fts').fetchone()[0] == 0:
         c.execute('INSERT INTO fts(rowid, txt) SELECT id, txt FROM chunks')
     c.execute('UPDATE chunks SET vec=NULL WHERE vec IS NOT NULL')
     c.commit()
@@ -80,7 +93,19 @@ def _chunks(text, size=500):
     return out
 
 
+def purge():
+    c = _db()
+    for (p,) in c.execute('SELECT path FROM docs').fetchall():
+        if not os.path.exists(p):
+            _del(c, 'doc:' + p)
+            _del(c, 'media:' + p)
+            c.execute('DELETE FROM docs WHERE path=?', (p,))
+    c.commit()
+    c.close()
+
+
 def index_docs():
+    purge()
     c = _db()
     for d in DIRS:
         try:
@@ -148,67 +173,70 @@ def search(q, k=3):
             toks.append(w)
     if not toks:
         return []
-    stems = [_stem(w) for w in toks]
+    ext = []
+    for w in toks:
+        for s in _SYN.get(w, '').split():
+            if s not in toks and s not in ext:
+                ext.append(s)
+    real = [_stem(w) for w in toks]
+    syn = [_stem(w) for w in ext]
     c = _db()
     try:
         if _FTS['ok']:
-            m = ' OR '.join('"%s"*' % s for s in stems)
+            m = ' OR '.join('"%s"*' % s for s in real + syn)
             rows = c.execute('SELECT txt, -bm25(fts) FROM fts WHERE fts MATCH ? ORDER BY bm25(fts) LIMIT ?',
-                             (m, k * 6)).fetchall()
+                             (m, k * 8)).fetchall()
         else:
             rows = [(t, 0.0) for (t,) in c.execute('SELECT txt FROM chunks').fetchall()]
     finally:
         c.close()
-    res = []
+    res, seen = [], set()
     for t, s in rows:
         nt = _norm(t)
-        hit = sum(1 for st in stems if st in nt)
-        if hit >= MIN_HITS:
-            res.append((hit, s, t))
+        if nt in seen:
+            continue
+        seen.add(nt)
+        score = sum(1 for st in real if st in nt) + 0.5 * min(2, sum(1 for st in syn if st in nt))
+        if score > 0:
+            res.append((score, s, t))
+    if not res:
+        return []
     res.sort(reverse=True)
-    return [(h, t) for h, s, t in res[:k]]
+    best = res[0][0]
+    return [(sc, t) for sc, s, t in res if sc >= best * 0.5][:k]
 
 
-def context(q):
-    if len(q.strip()) < 4:
-        return ''
+def fichiers(q, k=3):
+    c = _db()
+    out = []
     try:
-        return '\n'.join('- ' + t for s, t in search(q))
-    except Exception:
+        for sc, t in search(q, k * 3):
+            r = c.execute('SELECT src FROM chunks WHERE txt=? LIMIT 1', (t,)).fetchone()
+            if r:
+                n = os.path.basename(r[0].split(':', 1)[1]) if ':' in r[0] else 'notes'
+                if n not in out:
+                    out.append(n)
+    finally:
+        c.close()
+    return out[:k]
+
+
+def context(q, k=3):
+    q = (q or '').strip()
+    if len(q) < 4:
         return ''
-
-
-_SYN = {
-    'nom': 'appelle prenom',
-    'prenom': 'appelle nom',
-    'sport': 'basket foot joue joueur entrainement',
-    'pratique': 'joue',
-    'age': 'ans ne naissance',
-    'taille': 'cm mesure',
-    'poids': 'kg',
-    'habite': 'ville vit adresse',
-    'travail': 'metier boulot job',
-    'metier': 'travail job',
-    'telephone': 'numero',
-}
-_search0 = search
-_log = getattr(brain, 'log', lambda m: None)
-
-
-def search(q, k=3):
-    extra = []
-    for w in re.findall(r'\w+', _norm(q)):
-        extra += _SYN.get(w, '').split()
-    return _search0(q + ' ' + ' '.join(extra), k)
-
-
-def context(q):
-    if len(q.strip()) < 4:
-        return ''
+    t0 = time.time()
     try:
-        r = search(q)
-        _log('kb: %d resultat(s) pour %r' % (len(r), q[:60]))
-        return '\n'.join('- ' + t for s, t in r)
+        if router is not None and router.qtype(q) in SKIP:
+            return ''
+        out, used = [], 0
+        for s, t in search(q, k):
+            if out and used + len(t) > MAX_CTX:
+                continue
+            out.append('- ' + (t if len(t) <= MAX_CTX else t[:MAX_CTX].rsplit(' ', 1)[0]))
+            used += len(t)
+        _log('kb: %d extrait(s), %d car., %d ms' % (len(out), used, (time.time() - t0) * 1000))
+        return '\n'.join(out)
     except Exception as e:
         _log('kb erreur: ' + repr(e))
         return ''

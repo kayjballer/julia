@@ -599,6 +599,11 @@ def system_prompt():
     return SYSTEM.replace('Jacques', 'celui qui te parle').format(date=date, heure=time.strftime('%H:%M', d)) + REGLES_ORALES
 
 
+def with_ctx(text):
+    c = kb_context(text).strip()
+    return (c + '\n\nQuestion : ' + text) if c else text
+
+
 def kb_context(q):
     try:
         import kb
@@ -658,7 +663,7 @@ def kb_index():
 
 
 def ask(text):
-    msgs = [{'role': 'system', 'content': system_prompt() + " Si tu n'es pas sûr d'un fait (date, nom, chiffre), dis que tu ne sais pas au lieu d'inventer." + kb_context(text)}] + HIST[-8:] + [{'role': 'user', 'content': text}]
+    msgs = [{'role': 'system', 'content': system_prompt() + " Si tu n'es pas sûr d'un fait (date, nom, chiffre), dis que tu ne sais pas au lieu d'inventer."}] + HIST[-8:] + [{'role': 'user', 'content': with_ctx(text)}]
     body = json.dumps({'messages': msgs, 'max_tokens': MAX_TOKENS, 'temperature': 0.4, 'top_p': 0.85, 'top_k': 30,
                        'stream': True, 'cache_prompt': True}).encode()
     req = urllib.request.Request(LLM_URL, data=body, headers={'Content-Type': 'application/json'})
