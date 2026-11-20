@@ -254,3 +254,99 @@ def _fiche(q):
             return ' '.join(f.read().split())[:300]
     except Exception:
         return ''
+
+
+_SYN.update({
+    'poste': 'ailier pivot meneur arriere', 'club': 'equipe academie basket',
+    'langue': 'parle francais anglais', 'langues': 'parle francais anglais',
+    'objectif': 'veut devenir', 'but': 'veut devenir',
+    'classe': 'terminale', 'etudes': 'terminale diplome universite',
+})
+STOP.update({'quelles', 'suis', 'etre', 'avoir', 'ai', 'ete'})
+_IRR = {'est': 'es', 'a': 'as', 'fait': 'fais', 'va': 'vas', 'veut': 'veux', 'peut': 'peux', 'doit': 'dois',
+        'sait': 'sais', 'vient': 'viens', 'prend': 'prends', 'dit': 'dis', 'voit': 'vois', 'vit': 'vis',
+        'sort': 'sors', 'part': 'pars', 'met': 'mets', 'connait': 'connais'}
+_DET = {'une', 'le', 'la', 'les', 'un', 'des', 'du', 'de', 'sa', 'son', 'ses', 'mon', 'ma', 'mes', 'ce', 'cette', 'ces', 'quelque'}
+
+
+def _v2(w):
+    lw = w.lower()
+    if lw in _IRR:
+        return _IRR[lw]
+    if lw.endswith('ait') or lw.endswith('it'):
+        return w[:-1] + 's'
+    if lw.endswith('ra') or lw.endswith('e'):
+        return w + 's'
+    return w
+
+
+def adapter(s):
+    s = s.strip(' -\u2022\t')
+    pos = {'son': 'ton', 'sa': 'ta', 'ses': 'tes'}
+    poss = lambda x: re.sub(r"\b(son|sa|ses)\b", lambda m: pos[m.group(1).lower()].capitalize() if m.group(1)[0].isupper() else pos[m.group(1).lower()], x, flags=re.I)
+    rx = r"(ne\s+|n['\u2019])?(se\s+|s['\u2019])?([^\W\d_]+)(.*)$"
+    m = re.match(r"(?:l['\u2019]utilisateur|il|elle)\s+" + rx, s, re.I | re.S)
+    if not m and s[:1].islower():
+        m = re.match(rx, s, re.S)
+        if m and (m.group(3).lower() in _DET or not (m.group(3).lower() in _IRR or m.group(3).lower().endswith(('e', 'it', 'ra')))):
+            m = None
+    if not m:
+        return poss(s)
+    ne, se, v, rest = m.groups()
+    out = 'Tu '
+    if ne:
+        out += ne.lower().replace('\u2019', "'")
+    if se:
+        out += 'te ' if se.lower().startswith('se') else "t'"
+    return out + _v2(v) + poss(rest)
+
+
+def direct(q):
+    w = re.findall(r'\w+', _norm(q))
+    if not set(w) & {'mon', 'ma', 'mes', 'je', 'suis'} or set(w) & {'ton', 'ta', 'tes', 'tu'}:
+        return None
+    toks = []
+    for x in w:
+        if len(x) >= 3 and x not in STOP and x not in toks:
+            toks.append(x)
+    if not toks:
+        return None
+    cands = []
+    try:
+        with open(os.path.join(DIRS[-1], 'profil.txt'), encoding='utf-8', errors='replace') as f:
+            cands += re.split(r'(?<=[.!?])\s+|\n+', f.read())
+    except Exception:
+        pass
+    for sc, t in search(q, 8):
+        cands += re.split(r'(?<=[.!?])\s+|\s-\s|\n+', t)
+    seen, sents = set(), []
+    for x in cands:
+        x = x.strip(' -\u2022\t')
+        n = _norm(x)
+        if len(x) < 8 or n in seen or 'assistant' in n or 'niko' in n:
+            continue
+        seen.add(n)
+        sents.append(x)
+
+    def cov(x):
+        ws = re.findall(r'\w+', _norm(x))
+        got = set()
+        for t in toks:
+            for st in [_stem(t)] + [_stem(s) for s in _SYN.get(t, '').split()]:
+                if (len(st) >= 3 and any(a.startswith(st) for a in ws)) or st in ws:
+                    got.add(t)
+                    break
+        return got
+
+    left, chosen = set(toks), []
+    for _ in range(2):
+        best = max(((cov(x) & left, x) for x in sents), key=lambda r: (len(r[0]), -len(r[1])), default=(set(), ''))
+        if not best[0]:
+            break
+        chosen.append((min(toks.index(t) for t in best[0]), best[1]))
+        left -= best[0]
+    if not chosen or len(left) > len(toks) * 0.4:
+        return None
+    chosen.sort()
+    outs = [adapter(x) for _, x in chosen]
+    return ' '.join(o if o[-1:] in '.!?' else o + '.' for o in outs)

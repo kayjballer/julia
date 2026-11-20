@@ -883,11 +883,12 @@ def handle_inner(info):
         return
     try:
         import dossiers
-        rep = dossiers.executer(cmd)
+        rep = dossiers.executer(cmd) or __import__('kb').direct(cmd)
     except Exception:
         log('dossiers: ' + traceback.format_exc()[-200:])
         rep = None
     if rep:
+        log('direct: ' + rep[:120])
         Ears.setMuted(True)
         say(rep)
         push_state(phase='parle', force=True)
