@@ -601,6 +601,7 @@ def system_prompt():
 
 def with_ctx(text):
     c = kb_context(text).strip()
+    log('kb: %d car. | %s' % (len(c), c[:150].replace('\n', ' | ')))
     return (c + '\n\nQuestion : ' + text) if c else text
 
 
@@ -657,9 +658,29 @@ def kb_index():
                 n += 1
                 time.sleep(15)
 
+        threading.Thread(target=warmup, daemon=True).start()
         threading.Thread(target=_niko_watch, daemon=True).start()
     except Exception:
         log('kb: ' + traceback.format_exc()[-200:])
+
+
+def warmup():
+    for _ in range(100):
+        try:
+            urllib.request.urlopen(LLM_URL.rsplit('/v1/', 1)[0] + '/health', timeout=3).read()
+            break
+        except Exception:
+            time.sleep(3)
+    else:
+        return
+    try:
+        t0 = time.time()
+        msgs = [{'role': 'system', 'content': system_prompt() + " Si tu n'es pas sûr d'un fait (date, nom, chiffre), dis que tu ne sais pas au lieu d'inventer."}, {'role': 'user', 'content': 'Salut'}]
+        body = json.dumps({'messages': msgs, 'max_tokens': 1, 'cache_prompt': True}).encode()
+        urllib.request.urlopen(urllib.request.Request(LLM_URL, data=body, headers={'Content-Type': 'application/json'}), timeout=300).read()
+        log('llm: prechauffage %.1f s' % (time.time() - t0))
+    except Exception:
+        log('llm prechauffage: ' + traceback.format_exc()[-200:])
 
 
 def ask(text):
@@ -667,6 +688,7 @@ def ask(text):
     body = json.dumps({'messages': msgs, 'max_tokens': MAX_TOKENS, 'temperature': 0.4, 'top_p': 0.85, 'top_k': 30,
                        'stream': True, 'cache_prompt': True}).encode()
     req = urllib.request.Request(LLM_URL, data=body, headers={'Content-Type': 'application/json'})
+    log('llm: prompt %d car., %d messages' % (len(body), len(msgs)))
     full, buf, spoken = '', '', False
 
     def flush(chunk):
@@ -689,6 +711,12 @@ def ask(text):
             d = line[5:].strip()
             if d == '[DONE]':
                 break
+            if '"timings"' in d:
+                try:
+                    _tm = json.loads(d)['timings']
+                    log('llm: prompt %s tok (%s en cache) a %.0f tok/s | generation %.1f tok/s' % (_tm.get('prompt_n'), _tm.get('cache_n'), _tm.get('prompt_per_second') or 0, _tm.get('predicted_per_second') or 0))
+                except Exception:
+                    pass
             try:
                 delta = json.loads(d)['choices'][0]['delta'].get('content') or ''
             except Exception:
