@@ -8,7 +8,7 @@ DATA = os.environ.get('ANDROID_PRIVATE') or os.path.expanduser('~')
 LLM_URL = 'http://127.0.0.1:8080/v1/chat/completions'
 ACTIVE_WINDOW = 15          # secondes pendant lesquelles Niko continue d'écouter sans qu'on redise son nom
 IDLE_RESET = 300            # secondes sans parler : Niko oublie la conversation
-MAX_TOKENS = 160
+MAX_TOKENS = 100
 WAKE = ('niko', 'nico', 'nikko', 'nicko', 'niquo', 'nigo', 'miko')
 GREET = ('dis', 'salut', 'hey', 'hé', 'he', 'ok', 'oh', 'ho', 'bonjour', 'coucou', 'ben', 'eh')
 STOP = ('stop', 'tais toi', 'silence', 'ca suffit', 'arrete', 'arrete toi', 'ferme la')
@@ -658,7 +658,6 @@ def kb_index():
                 n += 1
                 time.sleep(15)
 
-        threading.Thread(target=warmup, daemon=True).start()
         threading.Thread(target=_niko_watch, daemon=True).start()
     except Exception:
         log('kb: ' + traceback.format_exc()[-200:])
@@ -684,7 +683,7 @@ def warmup():
 
 
 def ask(text):
-    msgs = [{'role': 'system', 'content': system_prompt() + " Si tu n'es pas sûr d'un fait (date, nom, chiffre), dis que tu ne sais pas au lieu d'inventer."}] + HIST[-8:] + [{'role': 'user', 'content': with_ctx(text)}]
+    msgs = [{'role': 'system', 'content': system_prompt() + " Si tu n'es pas sûr d'un fait (date, nom, chiffre), dis que tu ne sais pas au lieu d'inventer."}] + HIST[-4:] + [{'role': 'user', 'content': with_ctx(text)}]
     body = json.dumps({'messages': msgs, 'max_tokens': MAX_TOKENS, 'temperature': 0.4, 'top_p': 0.85, 'top_k': 30,
                        'stream': True, 'cache_prompt': True}).encode()
     req = urllib.request.Request(LLM_URL, data=body, headers={'Content-Type': 'application/json'})

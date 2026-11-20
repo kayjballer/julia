@@ -8,7 +8,7 @@ except Exception:
 
 DB = os.path.join(brain.DATA, 'niko_kb.db')
 DIRS = [os.path.join(brain.DATA, 'docs'), '/sdcard/Niko']
-MAX_CTX = 600
+MAX_CTX = 300
 SKIP = ('salut', 'commande', 'code')
 STOP = set('le la les un une des du de et que qui quoi est sont pas pour dans sur avec ce cette ces mon ma mes ton ta tes son sa ses nous vous ils elles je tu il elle on ne se me te lui en au aux ou mais donc car comme plus tres tout tous fait faire peux peut veux veut dis dit parle niko quel quelle quels comment pourquoi'.split())
 _SYN = {
@@ -113,7 +113,7 @@ def index_docs():
         except Exception:
             continue
         for n in names:
-            if not n.lower().endswith(('.txt', '.md')):
+            if not n.lower().endswith(('.txt', '.md')) or n.lower() == 'profil.txt':
                 continue
             p = os.path.join(d, n)
             try:
@@ -230,13 +230,27 @@ def context(q, k=3):
         if router is not None and router.qtype(q) in SKIP:
             return ''
         out, used = [], 0
+        fi = _fiche(q)
+        if fi:
+            out.append('- ' + fi)
         for s, t in search(q, k):
-            if out and used + len(t) > MAX_CTX:
+            if used and used + len(t) > MAX_CTX:
                 continue
+            t = t.lstrip('-• ')
             out.append('- ' + (t if len(t) <= MAX_CTX else t[:MAX_CTX].rsplit(' ', 1)[0]))
             used += len(t)
         _log('kb: %d extrait(s), %d car., %d ms' % (len(out), used, (time.time() - t0) * 1000))
         return '\n'.join(out)
     except Exception as e:
         _log('kb erreur: ' + repr(e))
+        return ''
+
+
+def _fiche(q):
+    if not set(re.findall(r'\w+', _norm(q))) & {'mon', 'ma', 'mes', 'je', 'suis'}:
+        return ''
+    try:
+        with open(os.path.join(DIRS[-1], 'profil.txt'), encoding='utf-8', errors='replace') as f:
+            return ' '.join(f.read().split())[:300]
+    except Exception:
         return ''
