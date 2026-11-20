@@ -170,7 +170,7 @@ def executer(texte):
     m = re.search(r'\brenomme\w*\s+(.+?)\s+(?:en|par)\s+(.+)$', t)
     if m:
         return renommer(m.group(1), m.group(2))
-    m = re.search(r'\b(?:supprime|efface|enleve|jette)\w*\s+(?:le\s+|la\s+|les\s+)?(?:fichier\s+|dossier\s+)?(.+)$', t)
+    m = re.search(r'\b(?:supprime|efface|enleve|jette)\w*\s+(?:le\s+|la\s+|les\s+)?(?:fichier\s+|dossier\s+)(.+)$', t)
     if m:
         return supprimer(m.group(1))
     m = re.search(r'\brestaure\w*\s+(.+)$', t)
@@ -261,7 +261,7 @@ _executer0 = executer
 def executer(texte):
     _B['id'] = time.time()
     t = kb._norm(texte).strip(' .!?')
-    if re.match(r'^(?:annule|annuler|defais)(?:\s+(?:ca|tout|la derniere action|le dernier rangement))?$', t):
+    if re.match(r'^(?:annule|annuler|defais)(?:\s+(?:ca|tout|la derniere action|le dernier rangement))?$', t) and _recent():
         return annuler()
     m = re.match(r'^\W*(?:note|retiens|memorise|enregistre)\w*\s+(?:que\s+|ceci\s*:?\s*)(.+)$', texte.strip(), re.I | re.S)
     if m:
@@ -274,3 +274,8 @@ def executer(texte):
     if m:
         return lire(m.group(1))
     return _executer0(texte)
+
+
+def _recent(sec=600):
+    j = _jload()
+    return bool(j) and time.time() - j[-1][0] < sec

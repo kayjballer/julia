@@ -680,6 +680,7 @@ def ask(text):
             spoken = True
         say(chunk)
 
+    _t0 = time.time()
     with urllib.request.urlopen(req, timeout=120) as r:
         for raw in r:
             line = raw.decode('utf-8', 'ignore').strip()
@@ -695,6 +696,7 @@ def ask(text):
             if not delta:
                 continue
             if not full:
+                log('llm: 1er token %.1f s' % (time.time() - _t0))
                 wait_stop()
             full += delta
             buf += delta
@@ -840,7 +842,7 @@ def handle_inner(info):
         Ears.setMuted(True)
         try:
             import kb
-            ok = kb.add(mk.group(1))
+            ok = bool(__import__('dossiers').noter(mk.group(1)))
         except Exception:
             log('kb: ' + traceback.format_exc()[-200:])
             ok = False
@@ -851,6 +853,18 @@ def handle_inner(info):
     if norm(cmd) in STOP:
         tts_stop()
         settle(False)
+        return
+    try:
+        import dossiers
+        rep = dossiers.executer(cmd)
+    except Exception:
+        log('dossiers: ' + traceback.format_exc()[-200:])
+        rep = None
+    if rep:
+        Ears.setMuted(True)
+        say(rep)
+        push_state(phase='parle', force=True)
+        settle(True)
         return
     try:
         kind = router.qtype(cmd)
